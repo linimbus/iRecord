@@ -21,6 +21,7 @@
     <Description>Lightweight Windows screen recorder (MP4 / MKV / MOV / WebM / GIF) powered by FFmpeg.</Description>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>

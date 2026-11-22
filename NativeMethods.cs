@@ -16,6 +16,14 @@ internal static class NativeMethods
     public const int GWL_EXSTYLE = -20;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
 
+    public const uint ATTACH_PARENT_PROCESS = 0xFFFFFFFF;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool AttachConsole(uint dwProcessId);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+
     public const uint WDA_NONE = 0x0;
     public const uint WDA_MONITOR = 0x1;
     public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;

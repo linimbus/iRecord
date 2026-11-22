@@ -7,6 +7,7 @@
 ## 功能
 
 - 托盘常驻，单实例运行，体积精简
+- 无头命令行：`iRecord-cli.exe` 可在无界面情况下执行录制，便于脚本与大语言模型调用
 - 三种录制范围：
   - 全屏（鼠标所在显示器）
   - 框选区域（拖动选择）
@@ -71,18 +72,44 @@ dotnet build -c Release
 powershell -ExecutionPolicy Bypass -File .\tools\build.ps1
 ```
 
-输出目录：`publish\`。目标机器需安装 .NET 10 Desktop Runtime。
+输出目录：`publish\`，包含 `iRecord.exe`（托盘程序）与 `iRecord-cli.exe`（无头命令行）。目标机器需安装 .NET 10 Desktop Runtime。
+
+## 无头命令行（自动化 / 大语言模型）
+
+`iRecord-cli.exe` 是控制台程序，适合脚本与 LLM 工具调用：它会阻塞到编码完成并返回退出码。`iRecord.exe` 也接受相同参数，但它属于 GUI 子系统，部分 Shell 不会等待其结束。
+
+运行 `iRecord-cli.exe help` 可查看完整能力说明（含返回的 JSON 结构与给 LLM 的使用建议）。常用命令：
+
+```powershell
+# 列出显示器 / 可录制窗口（输出 JSON）
+iRecord-cli.exe list-screens
+iRecord-cli.exe list-windows
+
+# 录制屏幕区域 8 秒，输出 MP4 并返回 JSON 结果
+iRecord-cli.exe record --mode region --region 0,0,1280,720 --duration 8 `
+    --format mp4 --audio none --mouse clicks --output "C:\out" --json
+
+# 录制指定窗口 10 秒，输出 WebM
+iRecord-cli.exe record --mode window --window notepad --duration 10 --format webm --json
+```
+
+- `--json` 时 stdout 只输出一个 JSON 对象，进度与错误写入 stderr。
+- `--result-file <path>` 可把相同结果同时写入文件，适合无法捕获 stdout 的环境。
+- 退出码：`0` 成功，`1` 录制或编码失败，`2` 参数错误。
+- 无头模式仍需当前已登录且未锁屏的交互式桌面，不能录制锁屏或其他会话。
 
 ## 项目结构
 
 ```
-Program.cs                     入口
+Program.cs                     入口（托盘模式 / CLI 模式）
 App/                           托盘、设置、本地化、快捷键、配置持久化
-Capture/                       屏幕捕获、区域/窗口选择、音频录制、FFmpeg 编码
+Capture/                       屏幕捕获、区域/窗口选择、音频录制、鼠标叠加、FFmpeg 编码
+Cli/                           无头命令行：命令解析、录制流程、帮助文本
 UI/                            设置窗口、录制控制条、快捷键输入框
 Assets/app.ico                 应用图标
 tools/build.ps1                发布脚本
 tools/make-icon.ps1            重新生成图标
+tools/iRecord.Cli/             控制台启动器项目（生成 iRecord-cli.exe）
 ```
 
 ## 实现说明
