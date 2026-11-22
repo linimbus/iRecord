@@ -23,6 +23,7 @@ dotnet publish .\iRecord.csproj `
 if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
 
 Copy-Item .\README.md ".\$Output\README.md" -Force
+Copy-Item .\README_en.md ".\$Output\README_en.md" -Force
 
 Write-Host ""
 Write-Host "Done. Output folder: $root\$Output" -ForegroundColor Green
