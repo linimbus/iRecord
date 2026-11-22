@@ -2,7 +2,7 @@
 
 [English](README_en.md) | 简体中文
 
-一个极简的 Windows 原生录屏工具。程序启动后常驻系统托盘，使用全局快捷键即可开始 / 暂停 / 停止录制，支持 **MP4 / MKV / MOV / WebM / GIF** 输出，并可把鼠标指针与点击效果录制进画面，通过开源 **FFmpeg** 完成编码。
+一个极简的 Windows 原生录屏工具。程序启动后常驻系统托盘，使用全局快捷键即可开始 / 暂停 / 停止录制，支持 **MP4 / MKV / MOV / WebM / GIF** 输出，并可把鼠标指针与点击效果录制进画面，通过开源 [**FFmpeg**](https://ffmpeg.org/) 完成编码。
 
 ## 功能
 
@@ -26,7 +26,7 @@
 
 - Windows 10 2004 及以上（推荐 Windows 11）
 - [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)（框架依赖发布方式）
-- FFmpeg 可执行文件（`ffmpeg.exe`）
+- FFmpeg 可执行文件（`ffmpeg.exe`，官方地址：<https://ffmpeg.org/>）
 
 ## FFmpeg 配置
 

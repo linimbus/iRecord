@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-A minimal native screen recorder for Windows. It runs in the system tray, lets you start / pause / stop recording with global hotkeys, supports **MP4 / MKV / MOV / WebM / GIF** output, can capture the mouse pointer and click effects into the video, and encodes with open-source **FFmpeg**.
+A minimal native screen recorder for Windows. It runs in the system tray, lets you start / pause / stop recording with global hotkeys, supports **MP4 / MKV / MOV / WebM / GIF** output, can capture the mouse pointer and click effects into the video, and encodes with open-source [**FFmpeg**](https://ffmpeg.org/).
 
 ## Features
 
@@ -26,7 +26,7 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
 
 - Windows 10 2004 or later (Windows 11 recommended)
 - [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) (framework-dependent deployment)
-- FFmpeg executable (`ffmpeg.exe`)
+- FFmpeg executable (`ffmpeg.exe`, official site: <https://ffmpeg.org/>)
 
 ## FFmpeg Setup
 
