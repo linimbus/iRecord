@@ -91,7 +91,7 @@ public static class CliRunner
 
     private static int ShowVersion()
     {
-        var version = typeof(CliRunner).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+        var version = typeof(CliRunner).Assembly.GetName().Version?.ToString(3) ?? "1.1.0";
         Out($"iRecord {version}");
         return ExitOk;
     }
@@ -592,7 +592,7 @@ public static class CliRunner
     }
 
     private const string HelpText = """
-iRecord 1.0.0 - headless command line interface
+iRecord 1.1.0 - headless command line interface
 
 USAGE
   iRecord-cli.exe <command> [options]

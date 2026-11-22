@@ -16,7 +16,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     private AppSettings _settings;
     private RecordingSession? _session;
     private ControlBarForm? _bar;
+    private RecordingBorderForm? _border;
     private SettingsForm? _settingsForm;
+    private bool _micVolumeDirty;
 
     public TrayApplicationContext()
     {
@@ -257,11 +259,22 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _session = session;
 
-        _bar = new ControlBarForm(() => _session?.Elapsed ?? TimeSpan.Zero);
+        _bar = new ControlBarForm(
+            () => _session?.Elapsed ?? TimeSpan.Zero,
+            session.HasSystemAudio,
+            session.HasMicAudio,
+            () => _session == null
+                ? (0f, 0f)
+                : (_session.SystemAudioLevel, _session.MicAudioLevel),
+            session.MicVolumePercent,
+            OnMicVolumeChanged);
         _bar.PauseClicked += TogglePause;
         _bar.StopClicked += StopRecording;
         _bar.Show();
         _bar.SetPaused(false);
+
+        _border = new RecordingBorderForm(() => _session?.CurrentCaptureRect ?? Rectangle.Empty);
+        _border.Show();
 
         RebuildMenu();
     }
@@ -274,9 +287,32 @@ public sealed class TrayApplicationContext : ApplicationContext
         RebuildMenu();
     }
 
+    private void OnMicVolumeChanged(int percent)
+    {
+        _session?.SetMicVolume(percent);
+        _settings.MicVolume = percent;
+        _micVolumeDirty = true;
+    }
+
+    private void SaveMicVolumeIfNeeded()
+    {
+        if (!_micVolumeDirty) return;
+        _micVolumeDirty = false;
+        try { SettingsStore.Save(_settings); } catch { }
+    }
+
+    private void CloseBorder()
+    {
+        _border?.Close();
+        _border?.Dispose();
+        _border = null;
+    }
+
     private void StopRecording()
     {
         if (_session == null || _session.IsEncoding) return;
+
+        SaveMicVolumeIfNeeded();
 
         var session = _session;
         session.Stop();
@@ -284,6 +320,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _bar?.Close();
         _bar?.Dispose();
         _bar = null;
+        CloseBorder();
 
         RebuildMenu();
         ShowBalloon(Localization.T("notify_processing_title"), Localization.T("notify_processing_body"),
@@ -305,9 +342,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         Post(() =>
         {
             _session = null;
+            SaveMicVolumeIfNeeded();
             _bar?.Close();
             _bar?.Dispose();
             _bar = null;
+            CloseBorder();
             RebuildMenu();
             ShowBalloon(Localization.T("notify_saved_title"),
                 Localization.Format("notify_saved_text", path), ToolTipIcon.Info);
@@ -319,9 +358,11 @@ public sealed class TrayApplicationContext : ApplicationContext
         Post(() =>
         {
             _session = null;
+            SaveMicVolumeIfNeeded();
             _bar?.Close();
             _bar?.Dispose();
             _bar = null;
+            CloseBorder();
             RebuildMenu();
             ShowBalloon(Localization.T("notify_error_title"),
                 Localization.Format("notify_error_text", message), ToolTipIcon.Error);
@@ -393,6 +434,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         try { _bar?.Close(); } catch { }
         try { _bar?.Dispose(); } catch { }
+        try { _border?.Close(); } catch { }
+        try { _border?.Dispose(); } catch { }
         try { _session?.Dispose(); } catch { }
         try { _settingsForm?.Close(); } catch { }
         try { _hotkeys.Dispose(); } catch { }

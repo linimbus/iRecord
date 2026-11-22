@@ -69,6 +69,7 @@ public static class SettingsStore
 
         s.Fps = Math.Clamp(s.Fps, 5, 60);
         s.GifFps = Math.Clamp(s.GifFps, 5, 30);
+        s.MicVolume = Math.Clamp(s.MicVolume, 0, 200);
 
         if (string.IsNullOrWhiteSpace(s.OutputFolder))
             s.OutputFolder = CreateDefault().OutputFolder;

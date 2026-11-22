@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-Write-Host "Publishing iRecord 1.0.0 ($Configuration / $Runtime, framework-dependent)..." -ForegroundColor Cyan
+Write-Host "Publishing iRecord 1.1.0 ($Configuration / $Runtime, framework-dependent)..." -ForegroundColor Cyan
 
 dotnet publish .\iRecord.csproj `
     -c $Configuration `

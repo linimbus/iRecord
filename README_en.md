@@ -1,4 +1,4 @@
-# iRecord 1.0.0
+# iRecord 1.1.0
 
 English | [简体中文](README.md)
 
@@ -17,10 +17,12 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
 - Audio capture: no audio / system audio / microphone / system + microphone
 - Global hotkeys: start, stop, pause/resume (default `F9` / `F10` / `F11`)
 - On-screen recording bar showing elapsed time with pause and stop buttons; the bar is excluded from the recording
+- Recording border: a red frame marks the actual capture area in tray mode, follows window movement, and is excluded from the recording
+- Volume feedback: the control bar shows live system and microphone levels; while recording the mic you can drag a slider to adjust gain (0–200%)
 - Pause/resume removes the paused period from both video and audio, keeping them in sync
 - Settings UI available in Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German, French and Spanish
-- Configurable frame rate, GIF frame rate, quality, mouse capture mode, output folder, FFmpeg path, hotkeys and default start mode
-- Version `1.0.0`
+- Configurable frame rate, GIF frame rate, quality, mouse capture mode, output folder, FFmpeg path, hotkeys and default start mode; microphone volume can be adjusted while recording
+- Version `1.1.0`
 
 ## Requirements
 
@@ -52,7 +54,7 @@ If it is not found on first launch, a tray notification appears. Set the path un
    - `F9` start recording (using the default start mode)
    - `F10` stop recording
    - `F11` pause / resume
-4. While recording, a control bar appears at the bottom center of the desktop; click "Pause" or "Stop" directly.
+4. While recording, a control bar appears at the bottom center of the desktop; click "Pause" or "Stop" directly. A red border marks the capture area. When audio capture is enabled, the bar shows system / microphone levels, and in microphone mode you can drag a slider to adjust the volume.
 5. Encoding starts automatically after stopping; a tray notification then shows where the file was saved. The default output folder is `Videos\iRecord`.
 
 ## Build
@@ -118,11 +120,14 @@ tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.ex
 - Audio capture: Windows WASAPI (system loopback / microphone, via NAudio)
 - Video encoding: FFmpeg `libx264` with VFR timestamps for accurate duration at high resolutions
 - Mouse capture: the pointer is drawn into each frame at its screen position, and button state is polled to draw click ripples (MP4/MKV/MOV are muxed directly; WebM is transcoded to VP9)
+- Recording border: a topmost, click-through border window that tracks the real capture rect and is excluded via `WDA_EXCLUDEFROMCAPTURE`
+- Volume feedback and gain: peak levels are computed from WASAPI callback data; microphone gain is applied in software before writing the WAV
 - Pause/resume: video is recorded in segments and joined losslessly on stop; paused time is not included
 - The control bar is excluded from the recording via `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`
 
 ## Known limitations
 
+- Headless CLI mode does not show the red border, control bar or volume slider
 - Uses GDI capture, so exclusive full-screen / hardware overlay content (some games) may appear black
 - WebM requires re-encoding the video to VP9, which is noticeably slower than other formats
 - If the selected audio source is completely silent during recording (especially system audio), the result may have no audio track
@@ -130,4 +135,4 @@ tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.ex
 
 ## Version
 
-1.0.0
+1.1.0

@@ -9,6 +9,7 @@ public sealed class AppSettings
     public string Quality { get; set; } = "high";
     public string Audio { get; set; } = "system";
     public string MouseMode { get; set; } = "clicks";
+    public int MicVolume { get; set; } = 100;
     public string OutputFolder { get; set; } = string.Empty;
     public string FfmpegPath { get; set; } = string.Empty;
     public string StartMode { get; set; } = "fullscreen";

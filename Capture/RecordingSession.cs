@@ -54,6 +54,10 @@ public sealed class RecordingSession : IDisposable
     private int _frameCount;
     private int _finalized;
 
+    private readonly object _rectLock = new();
+    private Rectangle _currentCaptureRect;
+    private int _micVolumePercent = 100;
+
     private volatile bool _running;
     private volatile bool _paused;
     private string? _error;
@@ -65,6 +69,27 @@ public sealed class RecordingSession : IDisposable
     public bool IsEncoding { get; private set; }
     public TimeSpan Elapsed => _clock.Elapsed;
     public string? LastError => _error;
+
+    public bool HasSystemAudio => _settings.Audio is "system" or "both";
+    public bool HasMicAudio => _settings.Audio is "mic" or "both";
+    public float SystemAudioLevel => _audio?.SystemLevel ?? 0f;
+    public float MicAudioLevel => _audio?.MicLevel ?? 0f;
+    public int MicVolumePercent => _micVolumePercent;
+
+    public Rectangle CurrentCaptureRect
+    {
+        get
+        {
+            lock (_rectLock)
+                return _currentCaptureRect;
+        }
+    }
+
+    public void SetMicVolume(int percent)
+    {
+        _micVolumePercent = Math.Clamp(percent, 0, 200);
+        _audio?.SetMicGain(_micVolumePercent / 100f);
+    }
 
     public event Action<string>? Finished;
     public event Action<string>? Failed;
@@ -81,6 +106,8 @@ public sealed class RecordingSession : IDisposable
         _captureRect = new Rectangle(rect.X, rect.Y, Width, Height);
         _fps = Math.Clamp(settings.Fps, 5, 60);
         _ffmpeg = FfmpegTools.Resolve(settings.FfmpegPath) ?? "ffmpeg.exe";
+        _micVolumePercent = Math.Clamp(settings.MicVolume, 0, 200);
+        _currentCaptureRect = _captureRect;
 
         _clock.Restart();
         _clock.Stop();
@@ -99,6 +126,7 @@ public sealed class RecordingSession : IDisposable
             if (_settings.Audio is not "none")
             {
                 _audio = new AudioRecorder();
+                _audio.SetMicGain(_micVolumePercent / 100f);
                 _audio.Start(_tempDir, _settings.Audio);
             }
 
@@ -228,6 +256,9 @@ public sealed class RecordingSession : IDisposable
                 {
                     sourceRect = _captureRect;
                 }
+
+                lock (_rectLock)
+                    _currentCaptureRect = sourceRect;
 
                 sw.Restart();
 
