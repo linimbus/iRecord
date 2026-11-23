@@ -1,4 +1,4 @@
-# iRecord 1.1.0
+# iRecord 1.1.1
 
 English | [简体中文](README.md)
 
@@ -22,7 +22,7 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
 - Pause/resume removes the paused period from both video and audio, keeping them in sync
 - Settings UI available in Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German, French and Spanish
 - Configurable frame rate, GIF frame rate, quality, mouse capture mode, output folder, FFmpeg path, hotkeys and default start mode; microphone volume can be adjusted while recording
-- Version `1.1.0`
+- Version `1.1.1`
 
 ## Requirements
 
@@ -76,6 +76,14 @@ powershell -ExecutionPolicy Bypass -File .\tools\build.ps1
 
 Output folder: `publish\`, containing `iRecord.exe` (tray app) and `iRecord-cli.exe` (headless CLI). The target machine needs the .NET 10 Desktop Runtime.
 
+To build and package a zip in one step (README files and `skills\` included):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\package.ps1
+```
+
+This produces `publish\iRecord-v<version>-win-x64.zip`. On Windows you can also double-click `tools\package.cmd`. Override `-Runtime`, `-Configuration` or `-Output` as needed, or pass `-SkipBuild` to repackage only.
+
 ## Headless CLI (automation / LLMs)
 
 `iRecord-cli.exe` is a console application intended for scripts and LLM tool calls: it blocks until encoding completes and returns an exit code. `iRecord.exe` accepts the same arguments, but it is a GUI-subsystem program, so some shells do not wait for it.
@@ -110,6 +118,7 @@ Cli/                           Headless CLI: argument parsing, recording flow, h
 UI/                            Settings window, recording bar, hotkey input box
 Assets/app.ico                 Application icon
 tools/build.ps1                Publish script
+tools/package.ps1              One-step publish + zip (package.cmd for double-click)
 tools/make-icon.ps1            Regenerate the icon
 tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.exe)
 ```
@@ -135,4 +144,4 @@ tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.ex
 
 ## Version
 
-1.1.0
+1.1.1

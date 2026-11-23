@@ -16,6 +16,9 @@ public sealed class SettingsForm : Form
     private readonly Label _mouseLabel = new();
     private readonly Label _outputLabel = new();
     private readonly Label _ffmpegLabel = new();
+    private readonly Label _generalHeader = new();
+    private readonly Label _recordingHeader = new();
+    private readonly Label _outputHeader = new();
     private readonly Label _hotkeysHeader = new();
     private readonly Label _hotkeyStartLabel = new();
     private readonly Label _hotkeyStopLabel = new();
@@ -59,15 +62,6 @@ public sealed class SettingsForm : Form
         ShowInTaskbar = false;
         Font = new Font("Segoe UI", 9f);
         AutoScaleMode = AutoScaleMode.None;
-
-        int width = Dpi.S(600);
-        int height = Dpi.S(512);
-        var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, width, height);
-        int margin = Dpi.S(40);
-        if (height > area.Height - margin) height = Math.Max(Dpi.S(240), area.Height - margin);
-        if (width > area.Width - margin) width = Math.Max(Dpi.S(320), area.Width - margin);
-
-        ClientSize = new Size(width, height);
         AutoScroll = true;
 
         BuildUi();
@@ -76,54 +70,102 @@ public sealed class SettingsForm : Form
 
     private void BuildUi()
     {
-        const int labelX = 16;
-        const int fieldX = 198;
-        const int fieldW = 218;
-        const int rowStart = 14;
+        const int margin = 20;
+        const int contentW = 620;
+        const int labelX = 20;
+        const int labelW = 150;
+        const int fieldX = 180;
+        const int fieldW = 300;
         const int rowH = 30;
         const int controlH = 26;
 
-        int RowY(int row) => rowStart + row * rowH;
+        var generalSep = new Panel();
+        var recordingSep = new Panel();
+        var outputSep = new Panel();
+        var hotkeysSep = new Panel();
+        var footerSep = new Panel();
 
-        foreach (var label in new[]
-                 {
-                     _languageLabel, _formatLabel, _fpsLabel, _gifFpsLabel, _qualityLabel, _audioLabel,
-                     _mouseLabel, _outputLabel, _ffmpegLabel, _hotkeyStartLabel, _hotkeyStopLabel,
-                     _hotkeyPauseLabel, _modeLabel
-                 })
+        foreach (var sep in new[] { generalSep, recordingSep, outputSep, hotkeysSep, footerSep })
+            sep.BackColor = Color.FromArgb(226, 228, 232);
+
+        int y = 16;
+
+        void Section(Label header, Control separator)
+        {
+            header.AutoSize = false;
+            header.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
+            header.ForeColor = Color.FromArgb(64, 64, 64);
+            header.TextAlign = ContentAlignment.MiddleLeft;
+            header.Bounds = Dpi.R(labelX, y, contentW, 22);
+            y += 24;
+            separator.Bounds = Dpi.R(labelX, y, contentW, 1);
+            y += 10;
+        }
+
+        void Row(Label label, Control field)
         {
             label.AutoSize = false;
             label.TextAlign = ContentAlignment.MiddleLeft;
-            label.Bounds = Dpi.R(labelX, 0, 176, rowH);
+            label.Bounds = Dpi.R(labelX, y, labelW, controlH);
+            field.Bounds = Dpi.R(fieldX, y, fieldW, controlH);
+            y += rowH;
         }
 
-        _languageLabel.Top = Dpi.S(RowY(0));
-        _formatLabel.Top = Dpi.S(RowY(1));
-        _fpsLabel.Top = Dpi.S(RowY(2));
-        _gifFpsLabel.Top = Dpi.S(RowY(3));
-        _qualityLabel.Top = Dpi.S(RowY(4));
-        _audioLabel.Top = Dpi.S(RowY(5));
-        _mouseLabel.Top = Dpi.S(RowY(6));
-        _outputLabel.Top = Dpi.S(RowY(7));
-        _ffmpegLabel.Top = Dpi.S(RowY(8));
-        _hotkeyStartLabel.Top = Dpi.S(RowY(10));
-        _hotkeyStopLabel.Top = Dpi.S(RowY(11));
-        _hotkeyPauseLabel.Top = Dpi.S(RowY(12));
-        _modeLabel.Top = Dpi.S(RowY(13));
+        Section(_generalHeader, generalSep);
+        Row(_languageLabel, _languageCombo);
+        Row(_modeLabel, _modeCombo);
+        y += 12;
 
-        _languageCombo.Bounds = Dpi.R(fieldX, RowY(0), fieldW, controlH);
-        _formatCombo.Bounds = Dpi.R(fieldX, RowY(1), fieldW, controlH);
-        _fps.Bounds = Dpi.R(fieldX, RowY(2), 100, controlH);
-        _gifFps.Bounds = Dpi.R(fieldX, RowY(3), 100, controlH);
-        _qualityCombo.Bounds = Dpi.R(fieldX, RowY(4), fieldW, controlH);
-        _audioCombo.Bounds = Dpi.R(fieldX, RowY(5), fieldW, controlH);
-        _mouseCombo.Bounds = Dpi.R(fieldX, RowY(6), fieldW, controlH);
-        _outputText.Bounds = Dpi.R(fieldX, RowY(7), fieldW, controlH);
-        _ffmpegText.Bounds = Dpi.R(fieldX, RowY(8), fieldW, controlH);
-        _hotStart.Bounds = Dpi.R(fieldX, RowY(10), 200, controlH);
-        _hotStop.Bounds = Dpi.R(fieldX, RowY(11), 200, controlH);
-        _hotPause.Bounds = Dpi.R(fieldX, RowY(12), 200, controlH);
-        _modeCombo.Bounds = Dpi.R(fieldX, RowY(13), fieldW, controlH);
+        Section(_recordingHeader, recordingSep);
+        Row(_formatLabel, _formatCombo);
+        Row(_qualityLabel, _qualityCombo);
+        Row(_fpsLabel, _fps);
+        Row(_gifFpsLabel, _gifFps);
+        Row(_audioLabel, _audioCombo);
+        Row(_mouseLabel, _mouseCombo);
+        y += 12;
+
+        Section(_outputHeader, outputSep);
+
+        _outputLabel.AutoSize = false;
+        _outputLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _outputLabel.Bounds = Dpi.R(labelX, y, labelW, controlH);
+        _outputText.Bounds = Dpi.R(fieldX, y, fieldW, controlH);
+        var browseOutput = new Button { Bounds = Dpi.R(fieldX + fieldW + 8, y, 100, controlH) };
+        browseOutput.Click += (_, _) => BrowseOutput();
+        _browseOutput = browseOutput;
+        y += rowH;
+
+        _ffmpegLabel.AutoSize = false;
+        _ffmpegLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _ffmpegLabel.Bounds = Dpi.R(labelX, y, labelW, controlH);
+        _ffmpegText.Bounds = Dpi.R(fieldX, y, 200, controlH);
+        var browseFfmpeg = new Button { Bounds = Dpi.R(fieldX + 208, y, 100, controlH) };
+        browseFfmpeg.Click += (_, _) => BrowseFfmpeg();
+        _browseFfmpeg = browseFfmpeg;
+        var detect = new Button { Bounds = Dpi.R(fieldX + 316, y, 124, controlH) };
+        detect.Click += (_, _) => DetectFfmpeg();
+        _detectFfmpeg = detect;
+        y += rowH + 12;
+
+        Section(_hotkeysHeader, hotkeysSep);
+        Row(_hotkeyStartLabel, _hotStart);
+        Row(_hotkeyStopLabel, _hotStop);
+        Row(_hotkeyPauseLabel, _hotPause);
+
+        _hint.AutoSize = false;
+        _hint.ForeColor = Color.DimGray;
+        _hint.Bounds = Dpi.R(labelX, y, contentW, 24);
+        y += 34;
+
+        footerSep.Bounds = Dpi.R(labelX, y, contentW, 1);
+        y += 12;
+
+        _save.Bounds = Dpi.R(412, y, 110, 34);
+        _save.Click += (_, _) => Save();
+        _cancel.Bounds = Dpi.R(530, y, 110, 34);
+        _cancel.DialogResult = DialogResult.Cancel;
+        y += 34 + 16;
 
         foreach (var combo in new[] { _languageCombo, _formatCombo, _qualityCombo, _audioCombo, _mouseCombo, _modeCombo })
         {
@@ -136,38 +178,35 @@ public sealed class SettingsForm : Form
         _gifFps.Minimum = 5;
         _gifFps.Maximum = 30;
 
-        _hotkeysHeader.AutoSize = false;
-        _hotkeysHeader.Bounds = Dpi.R(labelX, RowY(9) - 4, 564, rowH);
-        _hotkeysHeader.Font = new Font("Segoe UI", 10.5f, FontStyle.Bold);
-
-        _hint.AutoSize = false;
-        _hint.Bounds = Dpi.R(labelX, RowY(14), 564, rowH);
-        _hint.ForeColor = Color.DimGray;
-
-        var browseOutput = new Button { Bounds = Dpi.R(424, RowY(7), 72, controlH) };
-        browseOutput.Click += (_, _) => BrowseOutput();
-        var browseFfmpeg = new Button { Bounds = Dpi.R(424, RowY(8), 72, controlH) };
-        browseFfmpeg.Click += (_, _) => BrowseFfmpeg();
-        var detect = new Button { Bounds = Dpi.R(502, RowY(8), 80, controlH) };
-        detect.Click += (_, _) => DetectFfmpeg();
-        _browseOutput = browseOutput;
-        _browseFfmpeg = browseFfmpeg;
-        _detectFfmpeg = detect;
-
-        _save.Bounds = Dpi.R(366, RowY(15), 120, 34);
-        _save.Click += (_, _) => Save();
-        _cancel.Bounds = Dpi.R(494, RowY(15), 88, 34);
-        _cancel.DialogResult = DialogResult.Cancel;
-
         Controls.AddRange(new Control[]
         {
-            _languageLabel, _formatLabel, _fpsLabel, _gifFpsLabel, _qualityLabel, _audioLabel,
-            _mouseLabel, _outputLabel, _ffmpegLabel, _hotkeysHeader, _hotkeyStartLabel, _hotkeyStopLabel,
-            _hotkeyPauseLabel, _modeLabel, _hint,
-            _languageCombo, _formatCombo, _fps, _gifFps, _qualityCombo, _audioCombo, _mouseCombo,
-            _outputText, _ffmpegText, _hotStart, _hotStop, _hotPause, _modeCombo,
+            _generalHeader, generalSep, _recordingHeader, recordingSep,
+            _outputHeader, outputSep, _hotkeysHeader, hotkeysSep, footerSep,
+            _languageLabel, _modeLabel, _formatLabel, _qualityLabel, _fpsLabel, _gifFpsLabel,
+            _audioLabel, _mouseLabel, _outputLabel, _ffmpegLabel,
+            _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel, _hint,
+            _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
+            _audioCombo, _mouseCombo, _outputText, _ffmpegText,
+            _hotStart, _hotStop, _hotPause,
             browseOutput, browseFfmpeg, detect, _save, _cancel
         });
+
+        int tab = 0;
+        foreach (var control in new Control[]
+                 {
+                     _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
+                     _audioCombo, _mouseCombo, _outputText, browseOutput, _ffmpegText,
+                     browseFfmpeg, detect, _hotStart, _hotStop, _hotPause, _save, _cancel
+                 })
+            control.TabIndex = tab++;
+
+        int width = Dpi.S(margin * 2 + contentW);
+        int height = Dpi.S(y);
+        var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, width, height);
+        int gap = Dpi.S(40);
+        if (height > area.Height - gap) height = Math.Max(Dpi.S(240), area.Height - gap);
+        if (width > area.Width - gap) width = Math.Max(Dpi.S(320), area.Width - gap);
+        ClientSize = new Size(width, height);
 
         AcceptButton = _save;
         CancelButton = _cancel;
@@ -180,6 +219,10 @@ public sealed class SettingsForm : Form
     private void Populate()
     {
         Text = Localization.T("settings_title");
+        _generalHeader.Text = Localization.T("settings_section_general");
+        _recordingHeader.Text = Localization.T("settings_section_recording");
+        _outputHeader.Text = Localization.T("settings_section_output");
+        _hotkeysHeader.Text = Localization.T("settings_hotkeys");
         _languageLabel.Text = Localization.T("settings_language");
         _formatLabel.Text = Localization.T("settings_format");
         _fpsLabel.Text = Localization.T("settings_fps");
@@ -189,7 +232,6 @@ public sealed class SettingsForm : Form
         _mouseLabel.Text = Localization.T("settings_mouse");
         _outputLabel.Text = Localization.T("settings_output");
         _ffmpegLabel.Text = Localization.T("settings_ffmpeg");
-        _hotkeysHeader.Text = Localization.T("settings_hotkeys");
         _hotkeyStartLabel.Text = Localization.T("settings_hotkey_start");
         _hotkeyStopLabel.Text = Localization.T("settings_hotkey_stop");
         _hotkeyPauseLabel.Text = Localization.T("settings_hotkey_pause");
@@ -236,8 +278,11 @@ public sealed class SettingsForm : Form
             ("window", Localization.T("settings_mode_window"))
         }, _result.StartMode);
 
+        _formatCombo.SelectedIndexChanged += (_, _) => UpdateFormatDependentState();
+
         _fps.Value = Math.Clamp(_result.Fps, 5, 60);
         _gifFps.Value = Math.Clamp(_result.GifFps, 5, 30);
+        UpdateFormatDependentState();
         _outputText.Text = _result.OutputFolder;
         _ffmpegText.Text = _result.FfmpegPath;
         _hotStart.Text = _result.HotkeyStart;
@@ -262,6 +307,15 @@ public sealed class SettingsForm : Form
     }
 
     private static string? SelectedValue(ComboBox combo) => (combo.SelectedItem as ComboItem)?.Value;
+
+    private void UpdateFormatDependentState()
+    {
+        bool isGif = string.Equals(SelectedValue(_formatCombo), "gif", StringComparison.OrdinalIgnoreCase);
+        _fps.Enabled = !isGif;
+        _fpsLabel.Enabled = !isGif;
+        _gifFps.Enabled = isGif;
+        _gifFpsLabel.Enabled = isGif;
+    }
 
     private void BrowseOutput()
     {

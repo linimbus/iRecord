@@ -1,4 +1,4 @@
-# iRecord 1.1.0
+# iRecord 1.1.1
 
 [English](README_en.md) | 简体中文
 
@@ -22,7 +22,7 @@
 - 暂停/恢复会将暂停时段从视频与音频中剔除，音画保持同步
 - 设置界面支持多语言切换：简体中文、繁體中文、English、日本語、한국어、Deutsch、Français、Español
 - 可配置帧率、GIF 帧率、画质、鼠标录制方式、输出目录、FFmpeg 路径、快捷键与默认启动模式；录制时可调整麦克风音量
-- 版本 `1.1.0`
+- 版本 `1.1.1`
 
 ## 环境要求
 
@@ -76,6 +76,14 @@ powershell -ExecutionPolicy Bypass -File .\tools\build.ps1
 
 输出目录：`publish\`，包含 `iRecord.exe`（托盘程序）与 `iRecord-cli.exe`（无头命令行）。目标机器需安装 .NET 10 Desktop Runtime。
 
+如需一键完成发布并打包 zip（自动附带 README 与 `skills\`）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\package.ps1
+```
+
+生成 `publish\iRecord-v<版本>-win-x64.zip`。Windows 下也可以直接双击 `tools\package.cmd`。可用 `-Runtime`、`-Configuration`、`-Output` 覆盖默认参数，或用 `-SkipBuild` 跳过编译、只重新打包。
+
 ## 无头命令行（自动化 / 大语言模型）
 
 `iRecord-cli.exe` 是控制台程序，适合脚本与 LLM 工具调用：它会阻塞到编码完成并返回退出码。`iRecord.exe` 也接受相同参数，但它属于 GUI 子系统，部分 Shell 不会等待其结束。
@@ -110,6 +118,7 @@ Cli/                           无头命令行：命令解析、录制流程、�
 UI/                            设置窗口、录制控制条、快捷键输入框
 Assets/app.ico                 应用图标
 tools/build.ps1                发布脚本
+tools/package.ps1              一键发布并打包 zip（package.cmd 为双击入口）
 tools/make-icon.ps1            重新生成图标
 tools/iRecord.Cli/             控制台启动器项目（生成 iRecord-cli.exe）
 ```
@@ -135,4 +144,4 @@ tools/iRecord.Cli/             控制台启动器项目（生成 iRecord-cli.exe
 
 ## 版本
 
-1.1.0
+1.1.1
