@@ -1,4 +1,4 @@
-# iRecord 1.3.0
+# iRecord 1.3.1
 
 English | [简体中文](README.md)
 
@@ -25,7 +25,7 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
 - Pause/resume removes the paused period from both video and audio, keeping them in sync
 - Settings UI available in Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German, French and Spanish
 - Configurable frame rate, GIF frame rate, quality, system / microphone level gain, mouse capture mode, output folder, FFmpeg path, hotkeys and default start mode; microphone volume can be adjusted while recording
-- Version `1.3.0`
+- Version `1.3.1`
 
 ## Requirements
 
@@ -46,7 +46,7 @@ If it is not found on first launch, a tray notification appears. Set the path un
 
 ## Usage
 
-1. Run `iRecord.exe`; a foreground control panel appears: screenshots on the left (region / window / scrolling long screenshot), recording on the right of the divider (full screen / region / window), and settings at the far right. Region screenshots let you select multiple regions and press Enter to merge them vertically into one image. The app also stays in the system tray (bottom right); closing the panel hides it to the tray, and double-clicking the tray icon reopens it. Both screenshots and recordings are saved to the configured output folder.
+1. Run `iRecord.exe`; a foreground control panel appears: an always-on-top pin button on the far left, then screenshots (region / window / scrolling long screenshot), recording (full screen / region / window), plus settings and open-folder. Region screenshots let you select multiple regions and press Enter to merge them vertically into one image. The app also stays in the system tray (bottom right); closing the panel hides it to the tray, and double-clicking the tray icon reopens it. Both screenshots and recordings are saved to the configured output folder.
 2. Right-click the tray icon and choose:
    - Start recording (full screen / region / window)
    - Screenshots (region / window / scrolling long screenshot)
@@ -148,4 +148,4 @@ tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.ex
 
 ## Version
 
-1.3.0
+1.3.1

@@ -22,6 +22,7 @@ public sealed class MainPanelForm : Form
     private readonly IconButton _region;
     private readonly IconButton _window;
     private readonly IconButton _settings;
+    private readonly IconButton _folder;
     private readonly CloseButton _close;
     private readonly ToolTip _toolTip = new()
     {
@@ -45,6 +46,7 @@ public sealed class MainPanelForm : Form
     public event Action? RegionRequested;
     public event Action? WindowRequested;
     public event Action? SettingsRequested;
+    public event Action? OpenFolderRequested;
 
     public MainPanelForm()
     {
@@ -56,7 +58,7 @@ public sealed class MainPanelForm : Form
         Font = new Font("Segoe UI", 9f);
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
-        Size = new Size(Dpi.S(328), Dpi.S(56));
+        Size = new Size(Dpi.S(356), Dpi.S(56));
 
         _pin = CreateButton(IconKind.Pin, "panel_pin");
         _screenshotRegion = CreateButton(IconKind.ScreenshotRegion, "screenshot_region");
@@ -66,6 +68,7 @@ public sealed class MainPanelForm : Form
         _region = CreateButton(IconKind.Region, "panel_region");
         _window = CreateButton(IconKind.Window, "panel_window");
         _settings = CreateButton(IconKind.Settings, "panel_settings");
+        _folder = CreateButton(IconKind.Folder, "tray_open_folder");
 
         _pin.Click += (_, _) => TogglePinned();
         _screenshotRegion.Click += (_, _) => ScreenshotRegionRequested?.Invoke();
@@ -75,6 +78,7 @@ public sealed class MainPanelForm : Form
         _region.Click += (_, _) => RegionRequested?.Invoke();
         _window.Click += (_, _) => WindowRequested?.Invoke();
         _settings.Click += (_, _) => SettingsRequested?.Invoke();
+        _folder.Click += (_, _) => OpenFolderRequested?.Invoke();
 
         _close = new CloseButton();
         _close.Click += (_, _) => Hide();
@@ -87,12 +91,13 @@ public sealed class MainPanelForm : Form
         _toolTip.SetToolTip(_region, Localization.Format("panel_record_tip", Localization.T("panel_region")));
         _toolTip.SetToolTip(_window, Localization.Format("panel_record_tip", Localization.T("panel_window")));
         _toolTip.SetToolTip(_settings, Localization.T("panel_settings"));
+        _toolTip.SetToolTip(_folder, Localization.T("tray_open_folder"));
         _toolTip.SetToolTip(_close, Localization.T("panel_close"));
 
         Controls.AddRange(new Control[]
         {
             _pin, _screenshotRegion, _screenshotWindow, _screenshotScroll,
-            _fullscreen, _region, _window, _settings, _close
+            _fullscreen, _region, _window, _settings, _folder, _close
         });
 
         LayoutButtons();
@@ -147,6 +152,7 @@ public sealed class MainPanelForm : Form
         AddDivider();
 
         Place(_settings);
+        Place(_folder);
         AddDivider();
 
         _close.Bounds = new Rectangle(x, y, size, size);
@@ -169,6 +175,7 @@ public sealed class MainPanelForm : Form
         _region.Text = Localization.T("panel_region");
         _window.Text = Localization.T("panel_window");
         _settings.Text = Localization.T("panel_settings");
+        _folder.Text = Localization.T("tray_open_folder");
 
         _toolTip.SetToolTip(_pin, Localization.T("panel_pin"));
         _toolTip.SetToolTip(_screenshotRegion, Localization.T("screenshot_region"));
@@ -178,6 +185,7 @@ public sealed class MainPanelForm : Form
         _toolTip.SetToolTip(_region, Localization.Format("panel_record_tip", Localization.T("panel_region")));
         _toolTip.SetToolTip(_window, Localization.Format("panel_record_tip", Localization.T("panel_window")));
         _toolTip.SetToolTip(_settings, Localization.T("panel_settings"));
+        _toolTip.SetToolTip(_folder, Localization.T("tray_open_folder"));
         _toolTip.SetToolTip(_close, Localization.T("panel_close"));
     }
 
@@ -445,6 +453,21 @@ public sealed class MainPanelForm : Form
                 Slider(r.Top + r.Height * 3 / 4, 0.7f);
                 break;
             }
+            case IconKind.Folder:
+            {
+                int left = r.Left + Dpi.S(2);
+                int right = r.Right - Dpi.S(2);
+                int top = r.Top + Dpi.S(4);
+                int bottom = r.Bottom - Dpi.S(3);
+
+                g.DrawLine(pen, left, top + Dpi.S(1), left + Dpi.S(6), top + Dpi.S(1));
+                g.DrawLine(pen, left + Dpi.S(6), top + Dpi.S(1), left + Dpi.S(8), top + Dpi.S(3));
+                g.DrawLine(pen, left + Dpi.S(8), top + Dpi.S(3), right, top + Dpi.S(3));
+                g.DrawLine(pen, right, top + Dpi.S(3), right, bottom);
+                g.DrawLine(pen, right, bottom, left, bottom);
+                g.DrawLine(pen, left, bottom, left, top + Dpi.S(1));
+                break;
+            }
         }
     }
 
@@ -457,7 +480,8 @@ public sealed class MainPanelForm : Form
         FullScreen,
         Region,
         Window,
-        Settings
+        Settings,
+        Folder
     }
 
     private sealed class IconButton : Button

@@ -72,6 +72,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _panel.RegionRequested += () => StartRecording(CaptureMode.Region);
             _panel.WindowRequested += () => StartRecording(CaptureMode.Window);
             _panel.SettingsRequested += OpenSettings;
+            _panel.OpenFolderRequested += OpenOutputFolder;
             _panel.FormClosed += (_, _) => _panel = null;
         }
 
