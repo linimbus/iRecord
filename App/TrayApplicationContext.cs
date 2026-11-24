@@ -20,6 +20,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private SettingsForm? _settingsForm;
     private MainPanelForm? _panel;
     private bool _panelShouldReturn;
+    private bool _capturingScreenshot;
     private bool _micVolumeDirty;
 
     public TrayApplicationContext()
@@ -225,6 +226,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         Register("start", _settings.HotkeyStart);
         Register("stop", _settings.HotkeyStop);
         Register("pause", _settings.HotkeyPause);
+        Register("screenshot-region", _settings.HotkeyScreenshotRegion);
+        Register("screenshot-window", _settings.HotkeyScreenshotWindow);
+        Register("screenshot-scroll", _settings.HotkeyScreenshotScroll);
 
         if (failed.Count > 0)
         {
@@ -248,6 +252,18 @@ public sealed class TrayApplicationContext : ApplicationContext
         else if (action == "pause")
         {
             TogglePause();
+        }
+        else if (action == "screenshot-region")
+        {
+            CaptureRegionScreenshot();
+        }
+        else if (action == "screenshot-window")
+        {
+            CaptureWindowScreenshot();
+        }
+        else if (action == "screenshot-scroll")
+        {
+            CaptureScrollingScreenshot();
         }
     }
 
@@ -449,6 +465,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
+        bool panelTopMost = SuspendPanelTopMost();
         _settingsForm = new SettingsForm(_settings);
         try
         {
@@ -463,26 +480,51 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             _settingsForm.Dispose();
             _settingsForm = null;
+            RestorePanelTopMost(panelTopMost);
         }
+    }
+
+    private bool SuspendPanelTopMost()
+    {
+        if (_panel == null || !_panel.TopMost) return false;
+        _panel.TopMost = false;
+        return true;
+    }
+
+    private void RestorePanelTopMost(bool restore)
+    {
+        if (restore && _panel != null)
+            _panel.TopMost = true;
     }
 
     private void CaptureRegionScreenshot()
     {
-        if (_session != null) return;
+        if (_session != null || _capturingScreenshot) return;
+        _capturingScreenshot = true;
 
-        bool returnPanel = _panel?.Visible == true;
-        _panel?.Hide();
-        if (returnPanel)
-        {
-            Application.DoEvents();
-            Thread.Sleep(120);
-        }
-
+        bool returnPanel = false;
+        bool returnSettings = false;
+        double settingsOpacity = 1d;
         var previousCursor = Cursor.Current;
-        Cursor.Current = Cursors.WaitCursor;
 
         try
         {
+            returnPanel = _panel?.Visible == true;
+            _panel?.Hide();
+
+            returnSettings = _settingsForm is { Visible: true };
+            settingsOpacity = returnSettings ? _settingsForm!.Opacity : 1d;
+            if (returnSettings)
+                _settingsForm!.Opacity = 0d;
+
+            if (returnPanel || returnSettings)
+            {
+                Application.DoEvents();
+                Thread.Sleep(120);
+            }
+
+            Cursor.Current = Cursors.WaitCursor;
+
             using var picker = new MultiRegionSelectorForm();
             if (picker.ShowDialog() != DialogResult.OK) return;
 
@@ -497,26 +539,39 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             Cursor.Current = previousCursor;
             if (returnPanel) ShowMainPanel();
+            RestoreSettingsAfterCapture(returnSettings, settingsOpacity);
+            _capturingScreenshot = false;
         }
     }
 
     private void CaptureWindowScreenshot()
     {
-        if (_session != null) return;
+        if (_session != null || _capturingScreenshot) return;
+        _capturingScreenshot = true;
 
-        bool returnPanel = _panel?.Visible == true;
-        _panel?.Hide();
-        if (returnPanel)
-        {
-            Application.DoEvents();
-            Thread.Sleep(120);
-        }
-
+        bool returnPanel = false;
+        bool returnSettings = false;
+        double settingsOpacity = 1d;
         var previousCursor = Cursor.Current;
-        Cursor.Current = Cursors.WaitCursor;
 
         try
         {
+            returnPanel = _panel?.Visible == true;
+            _panel?.Hide();
+
+            returnSettings = _settingsForm is { Visible: true };
+            settingsOpacity = returnSettings ? _settingsForm!.Opacity : 1d;
+            if (returnSettings)
+                _settingsForm!.Opacity = 0d;
+
+            if (returnPanel || returnSettings)
+            {
+                Application.DoEvents();
+                Thread.Sleep(120);
+            }
+
+            Cursor.Current = Cursors.WaitCursor;
+
             using var picker = new WindowPickerForm();
             if (picker.ShowDialog() != DialogResult.OK) return;
 
@@ -532,26 +587,39 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             Cursor.Current = previousCursor;
             if (returnPanel) ShowMainPanel();
+            RestoreSettingsAfterCapture(returnSettings, settingsOpacity);
+            _capturingScreenshot = false;
         }
     }
 
     private void CaptureScrollingScreenshot()
     {
-        if (_session != null) return;
+        if (_session != null || _capturingScreenshot) return;
+        _capturingScreenshot = true;
 
-        bool returnPanel = _panel?.Visible == true;
-        _panel?.Hide();
-        if (returnPanel)
-        {
-            Application.DoEvents();
-            Thread.Sleep(120);
-        }
-
+        bool returnPanel = false;
+        bool returnSettings = false;
+        double settingsOpacity = 1d;
         var previousCursor = Cursor.Current;
-        Cursor.Current = Cursors.WaitCursor;
 
         try
         {
+            returnPanel = _panel?.Visible == true;
+            _panel?.Hide();
+
+            returnSettings = _settingsForm is { Visible: true };
+            settingsOpacity = returnSettings ? _settingsForm!.Opacity : 1d;
+            if (returnSettings)
+                _settingsForm!.Opacity = 0d;
+
+            if (returnPanel || returnSettings)
+            {
+                Application.DoEvents();
+                Thread.Sleep(120);
+            }
+
+            Cursor.Current = Cursors.WaitCursor;
+
             using var picker = new WindowPickerForm();
             if (picker.ShowDialog() != DialogResult.OK) return;
 
@@ -567,7 +635,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             Cursor.Current = previousCursor;
             if (returnPanel) ShowMainPanel();
+            RestoreSettingsAfterCapture(returnSettings, settingsOpacity);
+            _capturingScreenshot = false;
         }
+    }
+
+    private void RestoreSettingsAfterCapture(bool restore, double opacity)
+    {
+        if (!restore || _settingsForm == null) return;
+        _settingsForm.Opacity = opacity;
+        _settingsForm.Activate();
+        _settingsForm.BringToFront();
     }
 
     private static void ActivateTargetWindow(IntPtr hwnd)
@@ -612,8 +690,16 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ShowAbout()
     {
-        MessageBox.Show(Localization.T("about_text"), Localization.T("about_title"),
-            MessageBoxButtons.OK, MessageBoxIcon.Information);
+        bool panelTopMost = SuspendPanelTopMost();
+        try
+        {
+            MessageBox.Show(Localization.T("about_text"), Localization.T("about_title"),
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        finally
+        {
+            RestorePanelTopMost(panelTopMost);
+        }
     }
 
     private void ShowBalloon(string title, string text, ToolTipIcon icon)

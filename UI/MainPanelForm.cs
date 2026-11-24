@@ -14,6 +14,7 @@ public sealed class MainPanelForm : Form
     private static readonly Color IconHoverColor = Color.FromArgb(120, 190, 255);
     private static readonly Color DisabledColor = Color.FromArgb(112, 120, 132);
 
+    private readonly IconButton _pin;
     private readonly IconButton _screenshotRegion;
     private readonly IconButton _screenshotWindow;
     private readonly IconButton _screenshotScroll;
@@ -31,6 +32,7 @@ public sealed class MainPanelForm : Form
     };
 
     private readonly List<int> _dividerXs = new();
+    private bool _pinned;
 
     private Point _dragStartScreen;
     private Point _dragStartForm;
@@ -54,8 +56,9 @@ public sealed class MainPanelForm : Form
         Font = new Font("Segoe UI", 9f);
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
-        Size = new Size(Dpi.S(287), Dpi.S(56));
+        Size = new Size(Dpi.S(328), Dpi.S(56));
 
+        _pin = CreateButton(IconKind.Pin, "panel_pin");
         _screenshotRegion = CreateButton(IconKind.ScreenshotRegion, "screenshot_region");
         _screenshotWindow = CreateButton(IconKind.ScreenshotWindow, "screenshot_window");
         _screenshotScroll = CreateButton(IconKind.ScreenshotScroll, "screenshot_scroll");
@@ -64,6 +67,7 @@ public sealed class MainPanelForm : Form
         _window = CreateButton(IconKind.Window, "panel_window");
         _settings = CreateButton(IconKind.Settings, "panel_settings");
 
+        _pin.Click += (_, _) => TogglePinned();
         _screenshotRegion.Click += (_, _) => ScreenshotRegionRequested?.Invoke();
         _screenshotWindow.Click += (_, _) => ScreenshotWindowRequested?.Invoke();
         _screenshotScroll.Click += (_, _) => ScreenshotScrollRequested?.Invoke();
@@ -75,6 +79,7 @@ public sealed class MainPanelForm : Form
         _close = new CloseButton();
         _close.Click += (_, _) => Hide();
 
+        _toolTip.SetToolTip(_pin, Localization.T("panel_pin"));
         _toolTip.SetToolTip(_screenshotRegion, Localization.T("screenshot_region"));
         _toolTip.SetToolTip(_screenshotWindow, Localization.T("screenshot_window"));
         _toolTip.SetToolTip(_screenshotScroll, Localization.T("screenshot_scroll"));
@@ -86,7 +91,7 @@ public sealed class MainPanelForm : Form
 
         Controls.AddRange(new Control[]
         {
-            _screenshotRegion, _screenshotWindow, _screenshotScroll,
+            _pin, _screenshotRegion, _screenshotWindow, _screenshotScroll,
             _fullscreen, _region, _window, _settings, _close
         });
 
@@ -128,6 +133,9 @@ public sealed class MainPanelForm : Form
             return dividerX;
         }
 
+        Place(_pin);
+        AddDivider();
+
         Place(_screenshotRegion);
         Place(_screenshotWindow);
         Place(_screenshotScroll);
@@ -144,8 +152,16 @@ public sealed class MainPanelForm : Form
         _close.Bounds = new Rectangle(x, y, size, size);
     }
 
+    private void TogglePinned()
+    {
+        _pinned = !_pinned;
+        TopMost = _pinned;
+        _pin.SetActive(_pinned);
+    }
+
     public void RefreshLanguage()
     {
+        _pin.Text = Localization.T("panel_pin");
         _screenshotRegion.Text = Localization.T("screenshot_region");
         _screenshotWindow.Text = Localization.T("screenshot_window");
         _screenshotScroll.Text = Localization.T("screenshot_scroll");
@@ -154,6 +170,7 @@ public sealed class MainPanelForm : Form
         _window.Text = Localization.T("panel_window");
         _settings.Text = Localization.T("panel_settings");
 
+        _toolTip.SetToolTip(_pin, Localization.T("panel_pin"));
         _toolTip.SetToolTip(_screenshotRegion, Localization.T("screenshot_region"));
         _toolTip.SetToolTip(_screenshotWindow, Localization.T("screenshot_window"));
         _toolTip.SetToolTip(_screenshotScroll, Localization.T("screenshot_scroll"));
@@ -265,7 +282,7 @@ public sealed class MainPanelForm : Form
         return path;
     }
 
-    private static void DrawIcon(Graphics g, Rectangle r, IconKind kind, Color color, Color background)
+    private static void DrawIcon(Graphics g, Rectangle r, IconKind kind, Color color, Color background, bool active)
     {
         using var pen = new Pen(color, 2f * Dpi.Scale)
         {
@@ -276,6 +293,47 @@ public sealed class MainPanelForm : Form
 
         switch (kind)
         {
+            case IconKind.Pin:
+            {
+                var state = g.Save();
+                g.TranslateTransform(r.Left + r.Width / 2f, r.Top + r.Height / 2f);
+                g.RotateTransform(45f);
+
+                int top = -Dpi.S(8);
+                int neck = -Dpi.S(2);
+                int needleEnd = Dpi.S(8);
+
+                var head = new[]
+                {
+                    new PointF(-Dpi.S(5), top),
+                    new PointF(Dpi.S(5), top),
+                    new PointF(Dpi.S(2), neck),
+                    new PointF(-Dpi.S(2), neck)
+                };
+
+                if (active)
+                {
+                    using var brush = new SolidBrush(color);
+                    g.FillPolygon(brush, head);
+                }
+                else
+                {
+                    g.DrawLine(pen, head[0].X, head[0].Y, head[1].X, head[1].Y);
+                    g.DrawLine(pen, -Dpi.S(4), top, -Dpi.S(2), neck);
+                    g.DrawLine(pen, Dpi.S(4), top, Dpi.S(2), neck);
+                    g.DrawLine(pen, -Dpi.S(2), neck, Dpi.S(2), neck);
+                }
+
+                using (var needlePen = new Pen(color, active ? 1.9f * Dpi.Scale : 1.4f * Dpi.Scale)
+                       {
+                           StartCap = LineCap.Round,
+                           EndCap = LineCap.Round
+                       })
+                    g.DrawLine(needlePen, 0, neck, 0, needleEnd);
+
+                g.Restore(state);
+                break;
+            }
             case IconKind.ScreenshotRegion:
             {
                 var b = Rectangle.Inflate(r, -Dpi.S(2), -Dpi.S(2));
@@ -392,6 +450,7 @@ public sealed class MainPanelForm : Form
 
     private enum IconKind
     {
+        Pin,
         ScreenshotRegion,
         ScreenshotWindow,
         ScreenshotScroll,
@@ -406,6 +465,14 @@ public sealed class MainPanelForm : Form
         private readonly IconKind _icon;
         private bool _hover;
         private bool _pressed;
+        private bool _active;
+
+        public void SetActive(bool active)
+        {
+            if (_active == active) return;
+            _active = active;
+            Invalidate();
+        }
 
         public IconButton(IconKind icon)
         {
@@ -480,7 +547,7 @@ public sealed class MainPanelForm : Form
 
             bool enabled = Enabled;
             var back = enabled
-                ? _pressed ? ButtonPressedColor : _hover ? ButtonHoverColor : PanelColor
+                ? _pressed ? ButtonPressedColor : (_hover || _active) ? ButtonHoverColor : PanelColor
                 : PanelColor;
 
             var rect = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
@@ -498,8 +565,8 @@ public sealed class MainPanelForm : Form
                 g.DrawPath(focus, path);
             }
 
-            var iconColor = !enabled ? DisabledColor : _hover ? IconHoverColor : IconColor;
-            DrawIcon(g, new Rectangle(0, 0, Width, Height), _icon, iconColor, back);
+            var iconColor = !enabled ? DisabledColor : (_hover || _active) ? IconHoverColor : IconColor;
+            DrawIcon(g, new Rectangle(0, 0, Width, Height), _icon, iconColor, back, _active);
         }
     }
 

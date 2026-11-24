@@ -103,15 +103,38 @@ public sealed class WindowPickerForm : Form
             g.DrawRectangle(pen, rect);
 
             using var font = new Font("Segoe UI", 10f, FontStyle.Bold);
-            var textSize = g.MeasureString(hit.Title, font);
+            string title = hit.Title;
+            float maxTitleWidth = Math.Max(16, Width - 16);
+            var textSize = g.MeasureString(title, font);
+
+            if (textSize.Width > maxTitleWidth)
+            {
+                int lo = 0;
+                int hi = title.Length;
+                while (lo < hi)
+                {
+                    int mid = (lo + hi + 1) / 2;
+                    var candidate = title[..mid] + "…";
+                    if (g.MeasureString(candidate, font).Width <= maxTitleWidth)
+                        lo = mid;
+                    else
+                        hi = mid - 1;
+                }
+
+                title = lo > 0 ? title[..lo] + "…" : "…";
+                textSize = g.MeasureString(title, font);
+            }
+
             float tx = rect.Left;
             float ty = rect.Top - textSize.Height - 8;
             if (ty < 0) ty = rect.Top + 6;
-            tx = Math.Clamp(tx, 2, Width - textSize.Width - 8);
+
+            float maxTx = Math.Max(2, Width - textSize.Width - 8);
+            tx = Math.Clamp(tx, 2, maxTx);
 
             using var back = new SolidBrush(Color.FromArgb(210, 0, 0, 0));
             g.FillRectangle(back, tx - 4, ty - 2, textSize.Width + 8, textSize.Height + 4);
-            g.DrawString(hit.Title, font, Brushes.White, tx, ty);
+            g.DrawString(title, font, Brushes.White, tx, ty);
         }
 
         using var hintFont = new Font("Segoe UI", 13f);

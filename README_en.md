@@ -1,4 +1,4 @@
-# iRecord 1.2.1
+# iRecord 1.3.0
 
 English | [简体中文](README.md)
 
@@ -12,19 +12,20 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
   - Full screen (the monitor under the mouse)
   - Region (drag to select)
   - Window (hover to highlight, click to select)
-- Screenshots: region screenshots (select multiple regions and merge them into one image), window screenshots, and scrolling window screenshots that auto-scroll and stitch into one PNG
-- The control panel groups screenshot and recording actions, separated by a vertical divider
+- Screenshots: region screenshots (select multiple regions and merge them into one image), window screenshots, and scrolling window screenshots that auto-scroll and stitch seamlessly into one PNG
+- The control panel groups the pin, screenshot and recording actions, separated by vertical dividers
+- The control panel has an always-on-top (pin) button so it stays above other windows
 - Output formats: `MP4` (H.264), `MKV` (H.264), `MOV` (H.264), `WebM` (VP9 + Opus) or `GIF`
 - Mouse capture: hidden / show pointer / show pointer with highlighted left, right and middle clicks
 - Audio capture: no audio / system audio / microphone / system + microphone
-- Global hotkeys: start, stop, pause/resume (default `F9` / `F10` / `F11`)
+- Global hotkeys: start, stop, pause/resume (default `F9` / `F10` / `F11`); region / window / scrolling screenshot hotkeys are configurable in Settings
 - On-screen recording bar showing elapsed time with pause and stop buttons; the bar is excluded from the recording
 - Recording border: a red frame marks the actual capture area in tray mode, follows window movement, and is excluded from the recording
 - Volume feedback: the control bar shows live system and microphone levels; while recording the mic you can click or drag the volume cells to adjust gain (0–200%)
 - Pause/resume removes the paused period from both video and audio, keeping them in sync
 - Settings UI available in Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German, French and Spanish
 - Configurable frame rate, GIF frame rate, quality, system / microphone level gain, mouse capture mode, output folder, FFmpeg path, hotkeys and default start mode; microphone volume can be adjusted while recording
-- Version `1.2.1`
+- Version `1.3.0`
 
 ## Requirements
 
@@ -147,4 +148,4 @@ tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.ex
 
 ## Version
 
-1.2.1
+1.3.0

@@ -25,6 +25,9 @@ public sealed class SettingsForm : Form
     private readonly Label _hotkeyStartLabel = new();
     private readonly Label _hotkeyStopLabel = new();
     private readonly Label _hotkeyPauseLabel = new();
+    private readonly Label _hotkeyScreenshotRegionLabel = new();
+    private readonly Label _hotkeyScreenshotWindowLabel = new();
+    private readonly Label _hotkeyScreenshotScrollLabel = new();
     private readonly Label _modeLabel = new();
     private readonly Label _hint = new();
 
@@ -43,6 +46,9 @@ public sealed class SettingsForm : Form
     private readonly HotkeyBox _hotStart = new();
     private readonly HotkeyBox _hotStop = new();
     private readonly HotkeyBox _hotPause = new();
+    private readonly HotkeyBox _hotScreenshotRegion = new();
+    private readonly HotkeyBox _hotScreenshotWindow = new();
+    private readonly HotkeyBox _hotScreenshotScroll = new();
     private readonly Button _save = new();
     private readonly Button _cancel = new();
 
@@ -158,6 +164,9 @@ public sealed class SettingsForm : Form
         Row(_hotkeyStartLabel, _hotStart);
         Row(_hotkeyStopLabel, _hotStop);
         Row(_hotkeyPauseLabel, _hotPause);
+        Row(_hotkeyScreenshotRegionLabel, _hotScreenshotRegion);
+        Row(_hotkeyScreenshotWindowLabel, _hotScreenshotWindow);
+        Row(_hotkeyScreenshotScrollLabel, _hotScreenshotScroll);
 
         _hint.AutoSize = false;
         _hint.ForeColor = Color.DimGray;
@@ -194,10 +203,11 @@ public sealed class SettingsForm : Form
             _outputHeader, outputSep, _hotkeysHeader, hotkeysSep, footerSep,
             _languageLabel, _modeLabel, _formatLabel, _qualityLabel, _fpsLabel, _gifFpsLabel,
             _audioLabel, _systemGainLabel, _micGainLabel, _mouseLabel, _outputLabel, _ffmpegLabel,
-            _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel, _hint,
+            _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel,
+            _hotkeyScreenshotRegionLabel, _hotkeyScreenshotWindowLabel, _hotkeyScreenshotScrollLabel, _hint,
             _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
             _audioCombo, _systemGain, _micGain, _mouseCombo, _outputText, _ffmpegText,
-            _hotStart, _hotStop, _hotPause,
+            _hotStart, _hotStop, _hotPause, _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll,
             browseOutput, browseFfmpeg, detect, _save, _cancel
         });
 
@@ -206,7 +216,8 @@ public sealed class SettingsForm : Form
                  {
                      _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
                      _audioCombo, _systemGain, _micGain, _mouseCombo, _outputText, browseOutput, _ffmpegText,
-                     browseFfmpeg, detect, _hotStart, _hotStop, _hotPause, _save, _cancel
+                     browseFfmpeg, detect, _hotStart, _hotStop, _hotPause,
+                     _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll, _save, _cancel
                  })
             control.TabIndex = tab++;
 
@@ -247,6 +258,9 @@ public sealed class SettingsForm : Form
         _hotkeyStartLabel.Text = Localization.T("settings_hotkey_start");
         _hotkeyStopLabel.Text = Localization.T("settings_hotkey_stop");
         _hotkeyPauseLabel.Text = Localization.T("settings_hotkey_pause");
+        _hotkeyScreenshotRegionLabel.Text = Localization.T("settings_hotkey_screenshot_region");
+        _hotkeyScreenshotWindowLabel.Text = Localization.T("settings_hotkey_screenshot_window");
+        _hotkeyScreenshotScrollLabel.Text = Localization.T("settings_hotkey_screenshot_scroll");
         _modeLabel.Text = Localization.T("settings_start_mode");
         _hint.Text = Localization.T("settings_hint_hotkey");
         _save.Text = Localization.T("settings_save");
@@ -302,6 +316,9 @@ public sealed class SettingsForm : Form
         _hotStart.Text = _result.HotkeyStart;
         _hotStop.Text = _result.HotkeyStop;
         _hotPause.Text = _result.HotkeyPause;
+        _hotScreenshotRegion.Text = _result.HotkeyScreenshotRegion;
+        _hotScreenshotWindow.Text = _result.HotkeyScreenshotWindow;
+        _hotScreenshotScroll.Text = _result.HotkeyScreenshotScroll;
     }
 
     private static void FillCombo(ComboBox combo, IEnumerable<(string Value, string Text)> items, string? selected)
@@ -388,10 +405,16 @@ public sealed class SettingsForm : Form
         if (!ValidateHotkey(_hotStart.Text, "settings_hotkey_start")) return;
         if (!ValidateHotkey(_hotStop.Text, "settings_hotkey_stop")) return;
         if (!ValidateHotkey(_hotPause.Text, "settings_hotkey_pause")) return;
+        if (!ValidateHotkey(_hotScreenshotRegion.Text, "settings_hotkey_screenshot_region")) return;
+        if (!ValidateHotkey(_hotScreenshotWindow.Text, "settings_hotkey_screenshot_window")) return;
+        if (!ValidateHotkey(_hotScreenshotScroll.Text, "settings_hotkey_screenshot_scroll")) return;
 
         _result.HotkeyStart = _hotStart.Text.Trim();
         _result.HotkeyStop = _hotStop.Text.Trim();
         _result.HotkeyPause = _hotPause.Text.Trim();
+        _result.HotkeyScreenshotRegion = _hotScreenshotRegion.Text.Trim();
+        _result.HotkeyScreenshotWindow = _hotScreenshotWindow.Text.Trim();
+        _result.HotkeyScreenshotScroll = _hotScreenshotScroll.Text.Trim();
 
         if (string.IsNullOrWhiteSpace(_result.OutputFolder))
             _result.OutputFolder = SettingsStore.CreateDefault().OutputFolder;

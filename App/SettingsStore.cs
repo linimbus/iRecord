@@ -82,5 +82,8 @@ public static class SettingsStore
         if (string.IsNullOrWhiteSpace(s.HotkeyStart)) s.HotkeyStart = "F9";
         if (string.IsNullOrWhiteSpace(s.HotkeyStop)) s.HotkeyStop = "F10";
         if (string.IsNullOrWhiteSpace(s.HotkeyPause)) s.HotkeyPause = "F11";
+        s.HotkeyScreenshotRegion ??= string.Empty;
+        s.HotkeyScreenshotWindow ??= string.Empty;
+        s.HotkeyScreenshotScroll ??= string.Empty;
     }
 }

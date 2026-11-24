@@ -138,80 +138,87 @@ public static class ScreenshotService
                 int height = initialFull.Height;
                 int usableWidth = GetUsableWidth(width);
                 int contentWidth = usableWidth;
+                int contentHeight = height;
 
                 int stripEstimate = Math.Min(36, height / 4);
                 int usableScroll = Math.Max(48, height - 100 - stripEstimate);
                 notches = Math.Clamp((int)Math.Round(usableScroll * 0.4 / 48.0), 1, 5);
-                const int maxFrames = 100;
-                const int maxHeight = 20000;
+                const int maxFrames = 150;
+                const int maxHeight = 30000;
 
-                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_WHEEL, 0, 0, -120 * notches, UIntPtr.Zero);
-                scrollSteps++;
-                Thread.Sleep(320);
+                var initialSignature = BuildRowSignatures(initialFull, usableWidth, SignatureSegments);
+                var previousSignature = initialSignature;
+                int totalHeight = height;
+                int lastOffset = 0;
+                bool footerChecked = false;
 
-                var currentFull = CaptureRect(client);
-                int contentHeight = height;
-
-                if (currentFull.Width == width && currentFull.Height == height)
+                for (int frame = 0; frame < maxFrames && totalHeight < maxHeight; frame++)
                 {
-                    var initialSignature = BuildRowSignatures(initialFull, usableWidth, SignatureSegments);
+                    NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_WHEEL, 0, 0, -120 * notches, UIntPtr.Zero);
+                    scrollSteps++;
+                    Thread.Sleep(360);
+
+                    var currentFull = CaptureRect(client);
+                    if (currentFull.Width != width || currentFull.Height != height)
+                    {
+                        currentFull.Dispose();
+                        break;
+                    }
+
                     var currentSignature = BuildRowSignatures(currentFull, usableWidth, SignatureSegments);
 
-                    int footer = DetectStaticBottom(initialSignature, currentSignature, height, SignatureSegments);
-                    contentHeight = height - footer;
-
-                    int scrolled = FindScrollOffset(initialSignature, currentSignature, contentHeight, SignatureSegments);
-                    if (scrolled > 0 && contentHeight + scrolled <= maxHeight)
+                    if (!footerChecked)
                     {
-                        segments.Add(CropBottom(currentFull, contentWidth, contentHeight, scrolled));
-                        int totalHeight = contentHeight + scrolled;
+                        footerChecked = true;
 
-                        previousFull = currentFull;
-                        var previousSignature = currentSignature;
-
-                        for (int frame = 0; frame < maxFrames && totalHeight < maxHeight; frame++)
+                        if (SignatureDifference(initialSignature, currentSignature, height, SignatureSegments) < 1.2)
                         {
-                            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_WHEEL, 0, 0, -120 * notches, UIntPtr.Zero);
-                            scrollSteps++;
-                            Thread.Sleep(320);
-
-                            var nextFull = CaptureRect(client);
-                            if (nextFull.Width != width || nextFull.Height != height)
-                            {
-                                nextFull.Dispose();
-                                break;
-                            }
-
-                            var nextSignature = BuildRowSignatures(nextFull, usableWidth, SignatureSegments);
-                            int nextScroll = FindScrollOffset(previousSignature, nextSignature, contentHeight, SignatureSegments);
-                            if (nextScroll <= 0 || totalHeight + nextScroll > maxHeight)
-                            {
-                                nextFull.Dispose();
-                                break;
-                            }
-
-                            segments.Add(CropBottom(nextFull, contentWidth, contentHeight, nextScroll));
-                            totalHeight += nextScroll;
-
-                            if (!ReferenceEquals(previousFull, initialFull))
-                                previousFull?.Dispose();
-                            previousFull = nextFull;
-                            previousSignature = nextSignature;
+                            scrollSteps--;
+                            currentFull.Dispose();
+                            return CropRegion(initialFull, contentWidth, height);
                         }
+
+                        int footer = DetectStaticBottom(initialSignature, currentSignature, height, SignatureSegments);
+                        contentHeight = height - footer;
+                        totalHeight = contentHeight;
+                    }
+                    else if (SignatureDifference(previousSignature, currentSignature, contentHeight, SignatureSegments) < 1.2)
+                    {
+                        scrollSteps--;
+                        currentFull.Dispose();
+                        break;
+                    }
+
+                    int offset = FindScrollOffset(previousSignature, currentSignature, contentHeight, SignatureSegments);
+                    if (offset > 0)
+                        offset = RefineScrollOffset(previousFull!, currentFull, offset, contentHeight, usableWidth);
+
+                    if (offset <= 0)
+                    {
+                        int fallback = lastOffset > 0 ? lastOffset : Math.Max(48, notches * 48);
+                        offset = Math.Min(fallback, contentHeight - 24);
                     }
                     else
                     {
-                        currentFull.Dispose();
-                        previousFull = null;
+                        lastOffset = offset;
                     }
-                }
-                else
-                {
-                    currentFull.Dispose();
-                    previousFull = null;
+
+                    if (offset <= 0 || totalHeight + offset > maxHeight)
+                    {
+                        currentFull.Dispose();
+                        break;
+                    }
+
+                    segments.Add(CropBottom(currentFull, contentWidth, contentHeight, offset));
+                    totalHeight += offset;
+
+                    if (!ReferenceEquals(previousFull, initialFull))
+                        previousFull?.Dispose();
+                    previousFull = currentFull;
+                    previousSignature = currentSignature;
                 }
 
-                var result = new Bitmap(contentWidth, contentHeight + segments.Sum(s => s.Height), PixelFormat.Format32bppArgb);
+                var result = new Bitmap(contentWidth, totalHeight, PixelFormat.Format32bppArgb);
                 using (var g = Graphics.FromImage(result))
                 {
                     g.DrawImage(initialFull,
@@ -250,6 +257,35 @@ public static class ScreenshotService
         {
             NativeMethods.SetCursorPos(originalCursor.X, originalCursor.Y);
         }
+    }
+
+    private static Bitmap CropRegion(Bitmap source, int width, int height)
+    {
+        var result = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(result);
+        g.DrawImage(source,
+            new Rectangle(0, 0, width, height),
+            new Rectangle(0, 0, width, height),
+            GraphicsUnit.Pixel);
+        return result;
+    }
+
+    private static double SignatureDifference(float[] previous, float[] current, int height, int segments)
+    {
+        double sum = 0;
+        int count = 0;
+
+        for (int y = 0; y < height; y += 4)
+        {
+            int index = y * segments;
+            for (int s = 0; s < segments; s++)
+            {
+                sum += Math.Abs(previous[index + s] - current[index + s]);
+                count++;
+            }
+        }
+
+        return count > 0 ? sum / count : 0;
     }
 
     private static Bitmap CropBottom(Bitmap source, int width, int contentHeight, int height)
@@ -349,6 +385,107 @@ public static class ScreenshotService
         }
 
         return scrolled;
+    }
+
+    private static int RefineScrollOffset(Bitmap previous, Bitmap current, int coarse, int contentHeight, int usableWidth)
+    {
+        if (coarse <= 0 || previous.Width != current.Width || previous.Height != current.Height)
+            return coarse;
+
+        int min = Math.Max(8, coarse - 8);
+        int max = Math.Min(contentHeight - 24, coarse + 8);
+        if (max < min)
+            return coarse;
+
+        int bandEnd = Math.Max(min + 32, contentHeight - 8);
+        int bandStart = Math.Max(max + 4, bandEnd - 200);
+        if (bandEnd - bandStart < 32)
+            bandStart = Math.Max(max, bandEnd - 80);
+        if (bandEnd - bandStart < 16)
+            return coarse;
+
+        int width = Math.Min(usableWidth, Math.Min(previous.Width, current.Width));
+        if (width < 16)
+            return coarse;
+
+        BitmapData? previousData = null;
+        BitmapData? currentData = null;
+        byte[]? previousBytes = null;
+        byte[]? currentBytes = null;
+
+        try
+        {
+            previousData = previous.LockBits(new Rectangle(0, 0, previous.Width, previous.Height),
+                ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            currentData = current.LockBits(new Rectangle(0, 0, current.Width, current.Height),
+                ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+
+            int previousLength = previousData.Stride * previous.Height;
+            int currentLength = currentData.Stride * current.Height;
+            previousBytes = ArrayPool<byte>.Shared.Rent(previousLength);
+            currentBytes = ArrayPool<byte>.Shared.Rent(currentLength);
+            Marshal.Copy(previousData.Scan0, previousBytes, 0, previousLength);
+            Marshal.Copy(currentData.Scan0, currentBytes, 0, currentLength);
+
+            double best = double.MaxValue;
+            int bestOffset = coarse;
+
+            for (int offset = min; offset <= max; offset++)
+            {
+                double error = CompareBand(previousBytes, previousData.Stride, currentBytes, currentData.Stride,
+                    width, bandStart, bandEnd, offset);
+                if (error < best)
+                {
+                    best = error;
+                    bestOffset = offset;
+                }
+            }
+
+            return bestOffset;
+        }
+        catch
+        {
+            return coarse;
+        }
+        finally
+        {
+            if (previousData != null)
+                previous.UnlockBits(previousData);
+            if (currentData != null)
+                current.UnlockBits(currentData);
+            if (previousBytes != null)
+                ArrayPool<byte>.Shared.Return(previousBytes);
+            if (currentBytes != null)
+                ArrayPool<byte>.Shared.Return(currentBytes);
+        }
+    }
+
+    private static double CompareBand(byte[] previous, int previousStride, byte[] current, int currentStride,
+        int width, int startRow, int endRow, int offset)
+    {
+        int stepX = Math.Max(1, width / 80);
+        long sum = 0;
+        long count = 0;
+
+        for (int y = startRow; y < endRow; y++)
+        {
+            int py = y * previousStride;
+            int cy = (y - offset) * currentStride;
+            if (cy < 0)
+                continue;
+
+            for (int x = 0; x < width; x += stepX)
+            {
+                int i = py + x * 4;
+                int j = cy + x * 4;
+                sum += Math.Abs(previous[i] - current[j]);
+                sum += Math.Abs(previous[i + 1] - current[j + 1]);
+                sum += Math.Abs(previous[i + 2] - current[j + 2]);
+                count += 3;
+            }
+        }
+
+        return count > 0 ? (double)sum / count : double.MaxValue;
     }
 
     private static double CompareRows(float[] a, float[] b, int aStart, int bStart, int rows, int segments)
