@@ -18,6 +18,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ControlBarForm? _bar;
     private RecordingBorderForm? _border;
     private SettingsForm? _settingsForm;
+    private MainPanelForm? _panel;
+    private bool _panelShouldReturn;
     private bool _micVolumeDirty;
 
     public TrayApplicationContext()
@@ -35,11 +37,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             Visible = true,
             ContextMenuStrip = _menu
         };
-        _tray.DoubleClick += (_, _) =>
-        {
-            if (_session == null) StartRecording(ParseMode(_settings.StartMode));
-            else TogglePause();
-        };
+        _tray.DoubleClick += (_, _) => ShowMainPanel();
 
         _hotkeys.Pressed += OnHotkeyPressed;
 
@@ -51,6 +49,35 @@ public sealed class TrayApplicationContext : ApplicationContext
             Post(() => ShowBalloon(Localization.T("notify_error_title"),
                 Localization.T("notify_ffmpeg_missing"), ToolTipIcon.Warning));
         }
+
+        Application.Idle += ShowPanelOnStartup;
+    }
+
+    private void ShowPanelOnStartup(object? sender, EventArgs e)
+    {
+        Application.Idle -= ShowPanelOnStartup;
+        ShowMainPanel();
+    }
+
+    private void ShowMainPanel()
+    {
+        if (_panel == null || _panel.IsDisposed)
+        {
+            _panel = new MainPanelForm();
+            _panel.ScreenshotRegionRequested += CaptureRegionScreenshot;
+            _panel.ScreenshotWindowRequested += CaptureWindowScreenshot;
+            _panel.ScreenshotScrollRequested += CaptureScrollingScreenshot;
+            _panel.FullscreenRequested += () => StartRecording(CaptureMode.FullScreen);
+            _panel.RegionRequested += () => StartRecording(CaptureMode.Region);
+            _panel.WindowRequested += () => StartRecording(CaptureMode.Window);
+            _panel.SettingsRequested += OpenSettings;
+            _panel.FormClosed += (_, _) => _panel = null;
+        }
+
+        _panel.SetRecording(_session != null);
+        if (!_panel.Visible) _panel.Show();
+        _panel.Activate();
+        _panel.BringToFront();
     }
 
     private static Icon LoadIcon()
@@ -90,6 +117,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         bool idle = _session == null;
         bool recording = _session != null && !_session.IsEncoding;
 
+        var showPanel = new ToolStripMenuItem(Localization.T("tray_show_panel"));
+        showPanel.Click += (_, _) => ShowMainPanel();
+
         var startFull = new ToolStripMenuItem(Localization.T("tray_start_fullscreen"));
         startFull.Enabled = idle;
         startFull.Click += (_, _) => StartRecording(CaptureMode.FullScreen);
@@ -101,6 +131,18 @@ public sealed class TrayApplicationContext : ApplicationContext
         var startWindow = new ToolStripMenuItem(Localization.T("tray_start_window"));
         startWindow.Enabled = idle;
         startWindow.Click += (_, _) => StartRecording(CaptureMode.Window);
+
+        var screenshotRegion = new ToolStripMenuItem(Localization.T("screenshot_region"));
+        screenshotRegion.Enabled = idle;
+        screenshotRegion.Click += (_, _) => CaptureRegionScreenshot();
+
+        var screenshotWindow = new ToolStripMenuItem(Localization.T("screenshot_window"));
+        screenshotWindow.Enabled = idle;
+        screenshotWindow.Click += (_, _) => CaptureWindowScreenshot();
+
+        var screenshotScroll = new ToolStripMenuItem(Localization.T("screenshot_scroll"));
+        screenshotScroll.Enabled = idle;
+        screenshotScroll.Click += (_, _) => CaptureScrollingScreenshot();
 
         var pause = new ToolStripMenuItem(Localization.T(
             _session?.IsPaused == true ? "tray_resume" : "tray_pause"));
@@ -124,9 +166,15 @@ public sealed class TrayApplicationContext : ApplicationContext
         var exit = new ToolStripMenuItem(Localization.T("tray_exit"));
         exit.Click += (_, _) => ExitApplication();
 
+        _menu.Items.Add(showPanel);
+        _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(startFull);
         _menu.Items.Add(startRegion);
         _menu.Items.Add(startWindow);
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(screenshotRegion);
+        _menu.Items.Add(screenshotWindow);
+        _menu.Items.Add(screenshotScroll);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(pause);
         _menu.Items.Add(stop);
@@ -147,6 +195,8 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         try { _tray.Text = status.Length > 63 ? status[..63] : status; }
         catch { }
+
+        _panel?.SetRecording(_session != null);
     }
 
     private void OnLanguageChanged()
@@ -155,6 +205,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             RebuildMenu();
             _bar?.RefreshLanguage();
+            _panel?.RefreshLanguage();
         });
     }
 
@@ -244,6 +295,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (rect.Width < 8 || rect.Height < 8)
             return;
 
+        _panelShouldReturn = _panel?.Visible == true;
+        if (_panelShouldReturn)
+        {
+            _panel!.Hide();
+            Application.DoEvents();
+            Thread.Sleep(150);
+        }
+
         var session = new RecordingSession(_settings, mode, rect, windowHandle);
         session.Finished += OnSessionFinished;
         session.Failed += OnSessionFailed;
@@ -254,6 +313,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             session.Dispose();
             ShowBalloon(Localization.T("notify_error_title"),
                 session.LastError ?? Localization.T("notify_ffmpeg_missing"), ToolTipIcon.Error);
+            ReturnPanelIfNeeded();
             return;
         }
 
@@ -352,6 +412,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             RebuildMenu();
             ShowBalloon(Localization.T("notify_saved_title"),
                 Localization.Format("notify_saved_text", path), ToolTipIcon.Info);
+            ReturnPanelIfNeeded();
         });
     }
 
@@ -368,7 +429,15 @@ public sealed class TrayApplicationContext : ApplicationContext
             RebuildMenu();
             ShowBalloon(Localization.T("notify_error_title"),
                 Localization.Format("notify_error_text", message), ToolTipIcon.Error);
+            ReturnPanelIfNeeded();
         });
+    }
+
+    private void ReturnPanelIfNeeded()
+    {
+        if (!_panelShouldReturn) return;
+        _panelShouldReturn = false;
+        ShowMainPanel();
     }
 
     private void OpenSettings()
@@ -395,6 +464,133 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settingsForm.Dispose();
             _settingsForm = null;
         }
+    }
+
+    private void CaptureRegionScreenshot()
+    {
+        if (_session != null) return;
+
+        bool returnPanel = _panel?.Visible == true;
+        _panel?.Hide();
+        if (returnPanel)
+        {
+            Application.DoEvents();
+            Thread.Sleep(120);
+        }
+
+        var previousCursor = Cursor.Current;
+        Cursor.Current = Cursors.WaitCursor;
+
+        try
+        {
+            using var picker = new MultiRegionSelectorForm();
+            if (picker.ShowDialog() != DialogResult.OK) return;
+
+            using var bitmap = picker.CreateMergedImage();
+            SaveScreenshot(bitmap, "region");
+        }
+        catch (Exception ex)
+        {
+            ShowScreenshotError(ex);
+        }
+        finally
+        {
+            Cursor.Current = previousCursor;
+            if (returnPanel) ShowMainPanel();
+        }
+    }
+
+    private void CaptureWindowScreenshot()
+    {
+        if (_session != null) return;
+
+        bool returnPanel = _panel?.Visible == true;
+        _panel?.Hide();
+        if (returnPanel)
+        {
+            Application.DoEvents();
+            Thread.Sleep(120);
+        }
+
+        var previousCursor = Cursor.Current;
+        Cursor.Current = Cursors.WaitCursor;
+
+        try
+        {
+            using var picker = new WindowPickerForm();
+            if (picker.ShowDialog() != DialogResult.OK) return;
+
+            ActivateTargetWindow(picker.SelectedHandle);
+            using var bitmap = ScreenshotService.CaptureWindow(picker.SelectedHandle, picker.SelectedRect);
+            SaveScreenshot(bitmap, "window");
+        }
+        catch (Exception ex)
+        {
+            ShowScreenshotError(ex);
+        }
+        finally
+        {
+            Cursor.Current = previousCursor;
+            if (returnPanel) ShowMainPanel();
+        }
+    }
+
+    private void CaptureScrollingScreenshot()
+    {
+        if (_session != null) return;
+
+        bool returnPanel = _panel?.Visible == true;
+        _panel?.Hide();
+        if (returnPanel)
+        {
+            Application.DoEvents();
+            Thread.Sleep(120);
+        }
+
+        var previousCursor = Cursor.Current;
+        Cursor.Current = Cursors.WaitCursor;
+
+        try
+        {
+            using var picker = new WindowPickerForm();
+            if (picker.ShowDialog() != DialogResult.OK) return;
+
+            ActivateTargetWindow(picker.SelectedHandle);
+            using var bitmap = ScreenshotService.CaptureScrollingWindow(picker.SelectedHandle);
+            SaveScreenshot(bitmap, "long");
+        }
+        catch (Exception ex)
+        {
+            ShowScreenshotError(ex);
+        }
+        finally
+        {
+            Cursor.Current = previousCursor;
+            if (returnPanel) ShowMainPanel();
+        }
+    }
+
+    private static void ActivateTargetWindow(IntPtr hwnd)
+    {
+        try { NativeMethods.SetForegroundWindow(hwnd); } catch { }
+        Thread.Sleep(220);
+    }
+
+    private void SaveScreenshot(Bitmap bitmap, string suffix)
+    {
+        string folder = _settings.OutputFolder;
+        if (string.IsNullOrWhiteSpace(folder))
+            folder = SettingsStore.CreateDefault().OutputFolder;
+
+        string path = ScreenshotService.SavePng(bitmap, folder, suffix);
+        ShowBalloon(Localization.T("screenshot_saved_title"),
+            Localization.Format("screenshot_saved_text", path), ToolTipIcon.Info);
+    }
+
+    private void ShowScreenshotError(Exception ex)
+    {
+        ShowBalloon(Localization.T("screenshot_failed_title"),
+            Localization.Format("screenshot_failed_text", ex.Message), ToolTipIcon.Error);
     }
 
     private void OpenOutputFolder()
@@ -440,6 +636,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         try { _border?.Dispose(); } catch { }
         try { _session?.Dispose(); } catch { }
         try { _settingsForm?.Close(); } catch { }
+        try { _panel?.Dispose(); } catch { }
+        _panel = null;
         try { _hotkeys.Dispose(); } catch { }
         try { _tray.Visible = false; _tray.Dispose(); } catch { }
         Localization.Changed -= OnLanguageChanged;
@@ -450,6 +648,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            Application.Idle -= ShowPanelOnStartup;
+            try { _panel?.Dispose(); } catch { }
             try { _hotkeys.Dispose(); } catch { }
             try { _tray.Dispose(); } catch { }
             try { _icon.Dispose(); } catch { }
