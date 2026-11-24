@@ -13,6 +13,8 @@ public sealed class SettingsForm : Form
     private readonly Label _gifFpsLabel = new();
     private readonly Label _qualityLabel = new();
     private readonly Label _audioLabel = new();
+    private readonly Label _systemGainLabel = new();
+    private readonly Label _micGainLabel = new();
     private readonly Label _mouseLabel = new();
     private readonly Label _outputLabel = new();
     private readonly Label _ffmpegLabel = new();
@@ -34,6 +36,8 @@ public sealed class SettingsForm : Form
     private readonly ComboBox _modeCombo = new();
     private readonly NumericUpDown _fps = new();
     private readonly NumericUpDown _gifFps = new();
+    private readonly NumericUpDown _systemGain = new();
+    private readonly NumericUpDown _micGain = new();
     private readonly TextBox _outputText = new();
     private readonly TextBox _ffmpegText = new();
     private readonly HotkeyBox _hotStart = new();
@@ -122,6 +126,8 @@ public sealed class SettingsForm : Form
         Row(_fpsLabel, _fps);
         Row(_gifFpsLabel, _gifFps);
         Row(_audioLabel, _audioCombo);
+        Row(_systemGainLabel, _systemGain);
+        Row(_micGainLabel, _micGain);
         Row(_mouseLabel, _mouseCombo);
         y += 12;
 
@@ -177,16 +183,20 @@ public sealed class SettingsForm : Form
         _fps.Maximum = 60;
         _gifFps.Minimum = 5;
         _gifFps.Maximum = 30;
+        _systemGain.Minimum = 1;
+        _systemGain.Maximum = 10;
+        _micGain.Minimum = 1;
+        _micGain.Maximum = 10;
 
         Controls.AddRange(new Control[]
         {
             _generalHeader, generalSep, _recordingHeader, recordingSep,
             _outputHeader, outputSep, _hotkeysHeader, hotkeysSep, footerSep,
             _languageLabel, _modeLabel, _formatLabel, _qualityLabel, _fpsLabel, _gifFpsLabel,
-            _audioLabel, _mouseLabel, _outputLabel, _ffmpegLabel,
+            _audioLabel, _systemGainLabel, _micGainLabel, _mouseLabel, _outputLabel, _ffmpegLabel,
             _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel, _hint,
             _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
-            _audioCombo, _mouseCombo, _outputText, _ffmpegText,
+            _audioCombo, _systemGain, _micGain, _mouseCombo, _outputText, _ffmpegText,
             _hotStart, _hotStop, _hotPause,
             browseOutput, browseFfmpeg, detect, _save, _cancel
         });
@@ -195,7 +205,7 @@ public sealed class SettingsForm : Form
         foreach (var control in new Control[]
                  {
                      _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
-                     _audioCombo, _mouseCombo, _outputText, browseOutput, _ffmpegText,
+                     _audioCombo, _systemGain, _micGain, _mouseCombo, _outputText, browseOutput, _ffmpegText,
                      browseFfmpeg, detect, _hotStart, _hotStop, _hotPause, _save, _cancel
                  })
             control.TabIndex = tab++;
@@ -229,6 +239,8 @@ public sealed class SettingsForm : Form
         _gifFpsLabel.Text = Localization.T("settings_gif_fps");
         _qualityLabel.Text = Localization.T("settings_quality");
         _audioLabel.Text = Localization.T("settings_audio");
+        _systemGainLabel.Text = Localization.T("settings_system_gain");
+        _micGainLabel.Text = Localization.T("settings_mic_gain");
         _mouseLabel.Text = Localization.T("settings_mouse");
         _outputLabel.Text = Localization.T("settings_output");
         _ffmpegLabel.Text = Localization.T("settings_ffmpeg");
@@ -282,6 +294,8 @@ public sealed class SettingsForm : Form
 
         _fps.Value = Math.Clamp(_result.Fps, 5, 60);
         _gifFps.Value = Math.Clamp(_result.GifFps, 5, 30);
+        _systemGain.Value = Math.Clamp(_result.SystemLevelGain, 1, 10);
+        _micGain.Value = Math.Clamp(_result.MicLevelGain, 1, 10);
         UpdateFormatDependentState();
         _outputText.Text = _result.OutputFolder;
         _ffmpegText.Text = _result.FfmpegPath;
@@ -366,6 +380,8 @@ public sealed class SettingsForm : Form
         _result.StartMode = SelectedValue(_modeCombo) ?? "fullscreen";
         _result.Fps = (int)_fps.Value;
         _result.GifFps = (int)_gifFps.Value;
+        _result.SystemLevelGain = (int)_systemGain.Value;
+        _result.MicLevelGain = (int)_micGain.Value;
         _result.OutputFolder = _outputText.Text.Trim();
         _result.FfmpegPath = _ffmpegText.Text.Trim();
 

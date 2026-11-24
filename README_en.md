@@ -1,4 +1,4 @@
-# iRecord 1.1.1
+# iRecord 1.2.0
 
 English | [简体中文](README.md)
 
@@ -22,7 +22,7 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
 - Pause/resume removes the paused period from both video and audio, keeping them in sync
 - Settings UI available in Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German, French and Spanish
 - Configurable frame rate, GIF frame rate, quality, mouse capture mode, output folder, FFmpeg path, hotkeys and default start mode; microphone volume can be adjusted while recording
-- Version `1.1.1`
+- Version `1.2.0`
 
 ## Requirements
 
@@ -144,4 +144,4 @@ tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.ex
 
 ## Version
 
-1.1.1
+1.2.0

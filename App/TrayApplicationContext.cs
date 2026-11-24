@@ -266,6 +266,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             () => _session == null
                 ? (0f, 0f)
                 : (_session.SystemAudioLevel, _session.MicAudioLevel),
+            _settings.SystemLevelGain,
+            _settings.MicLevelGain,
             session.MicVolumePercent,
             OnMicVolumeChanged);
         _bar.PauseClicked += TogglePause;
