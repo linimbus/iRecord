@@ -662,8 +662,32 @@ public sealed class TrayApplicationContext : ApplicationContext
             folder = SettingsStore.CreateDefault().OutputFolder;
 
         string path = ScreenshotService.SavePng(bitmap, folder, suffix);
+        CopyScreenshotToClipboard(bitmap);
         ShowBalloon(Localization.T("screenshot_saved_title"),
             Localization.Format("screenshot_saved_text", path), ToolTipIcon.Info);
+    }
+
+    private static void CopyScreenshotToClipboard(Bitmap bitmap)
+    {
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            Bitmap? copy = null;
+            try
+            {
+                copy = new Bitmap(bitmap);
+                Clipboard.SetImage(copy);
+                copy = null;
+                return;
+            }
+            catch
+            {
+                Thread.Sleep(80);
+            }
+            finally
+            {
+                copy?.Dispose();
+            }
+        }
     }
 
     private void ShowScreenshotError(Exception ex)

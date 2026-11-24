@@ -1,4 +1,4 @@
-# iRecord 1.3.1
+# iRecord 1.3.2
 
 English | [简体中文](README.md)
 
@@ -12,7 +12,7 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
   - Full screen (the monitor under the mouse)
   - Region (drag to select)
   - Window (hover to highlight, click to select)
-- Screenshots: region screenshots (select multiple regions and merge them into one image), window screenshots, and scrolling window screenshots that auto-scroll and stitch seamlessly into one PNG
+- Screenshots: region screenshots (select multiple regions and merge them into one image), window screenshots, and scrolling window screenshots that auto-scroll and stitch seamlessly into one PNG; all are saved to disk and copied to the clipboard automatically
 - The control panel groups the pin, screenshot and recording actions, separated by vertical dividers
 - The control panel has an always-on-top (pin) button so it stays above other windows
 - Output formats: `MP4` (H.264), `MKV` (H.264), `MOV` (H.264), `WebM` (VP9 + Opus) or `GIF`
@@ -25,7 +25,7 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
 - Pause/resume removes the paused period from both video and audio, keeping them in sync
 - Settings UI available in Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German, French and Spanish
 - Configurable frame rate, GIF frame rate, quality, system / microphone level gain, mouse capture mode, output folder, FFmpeg path, hotkeys and default start mode; microphone volume can be adjusted while recording
-- Version `1.3.1`
+- Version `1.3.2`
 
 ## Requirements
 
@@ -148,4 +148,4 @@ tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.ex
 
 ## Version
 
-1.3.1
+1.3.2
