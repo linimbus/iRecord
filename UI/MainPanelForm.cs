@@ -15,6 +15,7 @@ public sealed class MainPanelForm : Form
     private static readonly Color DisabledColor = Color.FromArgb(112, 120, 132);
 
     private readonly IconButton _pin;
+    private readonly IconButton _singleRegion;
     private readonly IconButton _screenshotRegion;
     private readonly IconButton _screenshotWindow;
     private readonly IconButton _screenshotScroll;
@@ -33,12 +34,15 @@ public sealed class MainPanelForm : Form
     };
 
     private readonly List<int> _dividerXs = new();
+    private readonly System.Windows.Forms.Timer _opacityTimer;
     private bool _pinned;
+    private double _idleOpacity = 0.9;
 
     private Point _dragStartScreen;
     private Point _dragStartForm;
     private bool _dragging;
 
+    public event Action? SingleRegionRequested;
     public event Action? ScreenshotRegionRequested;
     public event Action? ScreenshotWindowRequested;
     public event Action? ScreenshotScrollRequested;
@@ -58,10 +62,11 @@ public sealed class MainPanelForm : Form
         Font = new Font("Segoe UI", 9f);
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
-        Size = new Size(Dpi.S(328), Dpi.S(40));
+        Size = new Size(Dpi.S(356), Dpi.S(40));
 
         _pin = CreateButton(IconKind.Pin, "panel_pin");
-        _screenshotRegion = CreateButton(IconKind.ScreenshotRegion, "screenshot_region");
+        _singleRegion = CreateButton(IconKind.ScreenshotRegionSingle, "screenshot_region_single");
+        _screenshotRegion = CreateButton(IconKind.ScreenshotRegionMulti, "screenshot_region");
         _screenshotWindow = CreateButton(IconKind.ScreenshotWindow, "screenshot_window");
         _screenshotScroll = CreateButton(IconKind.ScreenshotScroll, "screenshot_scroll");
         _fullscreen = CreateButton(IconKind.FullScreen, "panel_fullscreen");
@@ -71,6 +76,7 @@ public sealed class MainPanelForm : Form
         _folder = CreateButton(IconKind.Folder, "tray_open_folder");
 
         _pin.Click += (_, _) => TogglePinned();
+        _singleRegion.Click += (_, _) => SingleRegionRequested?.Invoke();
         _screenshotRegion.Click += (_, _) => ScreenshotRegionRequested?.Invoke();
         _screenshotWindow.Click += (_, _) => ScreenshotWindowRequested?.Invoke();
         _screenshotScroll.Click += (_, _) => ScreenshotScrollRequested?.Invoke();
@@ -84,6 +90,7 @@ public sealed class MainPanelForm : Form
         _close.Click += (_, _) => Hide();
 
         _toolTip.SetToolTip(_pin, Localization.T("panel_pin"));
+        _toolTip.SetToolTip(_singleRegion, Localization.T("screenshot_region_single"));
         _toolTip.SetToolTip(_screenshotRegion, Localization.T("screenshot_region"));
         _toolTip.SetToolTip(_screenshotWindow, Localization.T("screenshot_window"));
         _toolTip.SetToolTip(_screenshotScroll, Localization.T("screenshot_scroll"));
@@ -96,11 +103,15 @@ public sealed class MainPanelForm : Form
 
         Controls.AddRange(new Control[]
         {
-            _pin, _screenshotRegion, _screenshotWindow, _screenshotScroll,
+            _pin, _singleRegion, _screenshotRegion, _screenshotWindow, _screenshotScroll,
             _fullscreen, _region, _window, _settings, _folder, _close
         });
 
         LayoutButtons();
+
+        _opacityTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        _opacityTimer.Tick += (_, _) => UpdateOpacity();
+        Opacity = _idleOpacity;
 
         MouseDown += DragMouseDown;
         MouseMove += DragMouseMove;
@@ -141,6 +152,7 @@ public sealed class MainPanelForm : Form
         Place(_pin);
         AddDivider();
 
+        Place(_singleRegion);
         Place(_screenshotRegion);
         Place(_screenshotWindow);
         Place(_screenshotScroll);
@@ -165,9 +177,37 @@ public sealed class MainPanelForm : Form
         _pin.SetActive(_pinned);
     }
 
+    public void SetIdleOpacity(double opacity)
+    {
+        _idleOpacity = Math.Clamp(opacity, 0.2, 1.0);
+        UpdateOpacity();
+    }
+
+    private void UpdateOpacity()
+    {
+        double target = Visible && Bounds.Contains(Cursor.Position) ? 1.0 : _idleOpacity;
+        if (Math.Abs(Opacity - target) > 0.001)
+            Opacity = target;
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (Visible)
+        {
+            UpdateOpacity();
+            _opacityTimer.Start();
+        }
+        else
+        {
+            _opacityTimer.Stop();
+        }
+    }
+
     public void RefreshLanguage()
     {
         _pin.Text = Localization.T("panel_pin");
+        _singleRegion.Text = Localization.T("screenshot_region_single");
         _screenshotRegion.Text = Localization.T("screenshot_region");
         _screenshotWindow.Text = Localization.T("screenshot_window");
         _screenshotScroll.Text = Localization.T("screenshot_scroll");
@@ -178,6 +218,7 @@ public sealed class MainPanelForm : Form
         _folder.Text = Localization.T("tray_open_folder");
 
         _toolTip.SetToolTip(_pin, Localization.T("panel_pin"));
+        _toolTip.SetToolTip(_singleRegion, Localization.T("screenshot_region_single"));
         _toolTip.SetToolTip(_screenshotRegion, Localization.T("screenshot_region"));
         _toolTip.SetToolTip(_screenshotWindow, Localization.T("screenshot_window"));
         _toolTip.SetToolTip(_screenshotScroll, Localization.T("screenshot_scroll"));
@@ -191,6 +232,7 @@ public sealed class MainPanelForm : Form
 
     public void SetRecording(bool recording)
     {
+        _singleRegion.Enabled = !recording;
         _screenshotRegion.Enabled = !recording;
         _screenshotWindow.Enabled = !recording;
         _screenshotScroll.Enabled = !recording;
@@ -268,7 +310,11 @@ public sealed class MainPanelForm : Form
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
+            _opacityTimer.Stop();
+            _opacityTimer.Dispose();
             _toolTip.Dispose();
+        }
         base.Dispose(disposing);
     }
 
@@ -342,7 +388,7 @@ public sealed class MainPanelForm : Form
                 g.Restore(state);
                 break;
             }
-            case IconKind.ScreenshotRegion:
+            case IconKind.ScreenshotRegionSingle:
             {
                 var b = Rectangle.Inflate(r, -Dpi.S(2), -Dpi.S(2));
                 using (var dash = new Pen(color, 1.6f * Dpi.Scale)
@@ -360,6 +406,31 @@ public sealed class MainPanelForm : Form
                 int dot = Math.Max(1, Dpi.S(2));
                 using var brush = new SolidBrush(color);
                 g.FillEllipse(brush, cx - dot / 2, cy - dot / 2, dot, dot);
+                break;
+            }
+            case IconKind.ScreenshotRegionMulti:
+            {
+                var b = Rectangle.Inflate(r, -Dpi.S(2), -Dpi.S(2));
+                using (var dash = new Pen(color, 1.6f * Dpi.Scale)
+                       {
+                           DashStyle = DashStyle.Dash,
+                           DashPattern = new[] { 2.5f, 2f }
+                       })
+                    g.DrawRectangle(dash, b);
+
+                int d = Dpi.S(7);
+                int cx = r.Left + r.Width / 2;
+                int cy = r.Top + r.Height / 2;
+                g.DrawEllipse(pen, cx - d / 2, cy - d / 2, d, d);
+
+                int dot = Math.Max(1, Dpi.S(2));
+                using (var brush = new SolidBrush(color))
+                    g.FillEllipse(brush, cx - dot / 2, cy - dot / 2, dot, dot);
+
+                int plusX = r.Right - Dpi.S(4);
+                int plusY = r.Top + Dpi.S(4);
+                g.DrawLine(pen, plusX - Dpi.S(2), plusY, plusX + Dpi.S(2), plusY);
+                g.DrawLine(pen, plusX, plusY - Dpi.S(2), plusX, plusY + Dpi.S(2));
                 break;
             }
             case IconKind.ScreenshotWindow:
@@ -474,7 +545,8 @@ public sealed class MainPanelForm : Form
     private enum IconKind
     {
         Pin,
-        ScreenshotRegion,
+        ScreenshotRegionSingle,
+        ScreenshotRegionMulti,
         ScreenshotWindow,
         ScreenshotScroll,
         FullScreen,

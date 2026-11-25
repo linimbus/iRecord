@@ -19,7 +19,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     private RecordingBorderForm? _border;
     private SettingsForm? _settingsForm;
     private MainPanelForm? _panel;
+    private readonly List<ImageEditorForm> _editors = new();
     private bool _panelShouldReturn;
+    private bool _editorsTopMostSuspended;
     private bool _capturingScreenshot;
     private bool _micVolumeDirty;
 
@@ -65,6 +67,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_panel == null || _panel.IsDisposed)
         {
             _panel = new MainPanelForm();
+            _panel.SingleRegionRequested += CaptureSingleRegionScreenshot;
             _panel.ScreenshotRegionRequested += CaptureRegionScreenshot;
             _panel.ScreenshotWindowRequested += CaptureWindowScreenshot;
             _panel.ScreenshotScrollRequested += CaptureScrollingScreenshot;
@@ -77,6 +80,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         _panel.SetRecording(_session != null);
+        _panel.SetIdleOpacity(_settings.PanelOpacity / 100.0);
         if (!_panel.Visible) _panel.Show();
         _panel.Activate();
         _panel.BringToFront();
@@ -213,6 +217,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         catch { }
 
         _panel?.SetRecording(_session != null);
+        _panel?.SetIdleOpacity(_settings.PanelOpacity / 100.0);
     }
 
     private void OnLanguageChanged()
@@ -517,6 +522,53 @@ public sealed class TrayApplicationContext : ApplicationContext
             _panel.TopMost = true;
     }
 
+    private void CaptureSingleRegionScreenshot()
+    {
+        if (_session != null || _capturingScreenshot) return;
+        _capturingScreenshot = true;
+
+        bool returnPanel = false;
+        bool returnSettings = false;
+        double settingsOpacity = 1d;
+        var previousCursor = Cursor.Current;
+
+        try
+        {
+            returnPanel = _panel?.Visible == true;
+            _panel?.Hide();
+
+            returnSettings = _settingsForm is { Visible: true };
+            settingsOpacity = returnSettings ? _settingsForm!.Opacity : 1d;
+            if (returnSettings)
+                _settingsForm!.Opacity = 0d;
+
+            if (returnPanel || returnSettings)
+            {
+                Application.DoEvents();
+                Thread.Sleep(120);
+            }
+
+            Cursor.Current = Cursors.WaitCursor;
+
+            using var picker = new RegionSelectorForm();
+            if (picker.ShowDialog() != DialogResult.OK) return;
+
+            using var bitmap = ScreenshotService.CaptureRect(picker.SelectedRegion);
+            SaveScreenshot(bitmap, "region-single");
+        }
+        catch (Exception ex)
+        {
+            ShowScreenshotError(ex);
+        }
+        finally
+        {
+            Cursor.Current = previousCursor;
+            if (returnPanel) ShowMainPanel();
+            RestoreSettingsAfterCapture(returnSettings, settingsOpacity);
+            _capturingScreenshot = false;
+        }
+    }
+
     private void CaptureRegionScreenshot()
     {
         if (_session != null || _capturingScreenshot) return;
@@ -682,8 +734,37 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         string path = ScreenshotService.SavePng(bitmap, folder, suffix);
         CopyScreenshotToClipboard(bitmap);
+        ShowImageEditor((Bitmap)bitmap.Clone(), path);
         ShowBalloon(Localization.T("screenshot_saved_title"),
             Localization.Format("screenshot_saved_text", path), ToolTipIcon.Info);
+    }
+
+    private void ShowImageEditor(Bitmap image, string path)
+    {
+        var editor = new ImageEditorForm(image, path);
+        _editors.Add(editor);
+
+        if (_editors.Count == 1)
+            _editorsTopMostSuspended = SuspendPanelTopMost();
+
+        editor.FormClosed += (_, _) =>
+        {
+            _editors.Remove(editor);
+            editor.Dispose();
+
+            if (_editors.Count == 0 && _editorsTopMostSuspended)
+            {
+                _editorsTopMostSuspended = false;
+                RestorePanelTopMost(true);
+            }
+        };
+
+        _dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (editor.IsDisposed) return;
+            editor.Show();
+            editor.Activate();
+        }));
     }
 
     private static void CopyScreenshotToClipboard(Bitmap bitmap)
@@ -766,6 +847,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         try { _border?.Dispose(); } catch { }
         try { _session?.Dispose(); } catch { }
         try { _settingsForm?.Close(); } catch { }
+        foreach (var editor in _editors.ToArray())
+        {
+            try { editor.Close(); } catch { }
+            try { editor.Dispose(); } catch { }
+        }
+        _editors.Clear();
         try { _panel?.Dispose(); } catch { }
         _panel = null;
         try { _hotkeys.Dispose(); } catch { }

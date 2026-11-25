@@ -30,6 +30,7 @@ public sealed class SettingsForm : Form
     private readonly Label _hotkeyScreenshotWindowLabel = new();
     private readonly Label _hotkeyScreenshotScrollLabel = new();
     private readonly Label _modeLabel = new();
+    private readonly Label _opacityLabel = new();
     private readonly Label _hint = new();
 
     private readonly ComboBox _languageCombo = new();
@@ -42,6 +43,7 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _gifFps = new();
     private readonly NumericUpDown _systemGain = new();
     private readonly NumericUpDown _micGain = new();
+    private readonly NumericUpDown _opacity = new();
     private readonly TextBox _outputText = new();
     private readonly TextBox _ffmpegText = new();
     private readonly HotkeyBox _hotStart = new();
@@ -129,6 +131,7 @@ public sealed class SettingsForm : Form
         Section(_generalHeader, generalSep, leftLabelX, contentW, ref y);
         Row(_languageLabel, _languageCombo, leftLabelX, leftFieldX, 300, ref y);
         Row(_modeLabel, _modeCombo, leftLabelX, leftFieldX, 300, ref y);
+        Row(_opacityLabel, _opacity, leftLabelX, leftFieldX, 300, ref y);
         y += 12;
 
         int leftY = y;
@@ -206,18 +209,20 @@ public sealed class SettingsForm : Form
         _systemGain.Maximum = 10;
         _micGain.Minimum = 1;
         _micGain.Maximum = 10;
+        _opacity.Minimum = 20;
+        _opacity.Maximum = 100;
 
         Controls.AddRange(new Control[]
         {
             _generalHeader, generalSep, _recordingHeader, recordingSep,
             _hotkeysHeader, hotkeysSep, _outputHeader, outputSep, footerSep,
-            _languageLabel, _modeLabel,
+            _languageLabel, _modeLabel, _opacityLabel,
             _formatLabel, _qualityLabel, _fpsLabel, _gifFpsLabel, _audioLabel,
             _systemGainLabel, _micGainLabel, _mouseLabel,
             _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel, _hotkeyShowPanelLabel,
             _hotkeyScreenshotRegionLabel, _hotkeyScreenshotWindowLabel, _hotkeyScreenshotScrollLabel, _hint,
             _outputLabel, _ffmpegLabel,
-            _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
+            _languageCombo, _modeCombo, _opacity, _formatCombo, _qualityCombo, _fps, _gifFps,
             _audioCombo, _systemGain, _micGain, _mouseCombo,
             _hotStart, _hotStop, _hotPause, _hotShowPanel,
             _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll,
@@ -227,7 +232,7 @@ public sealed class SettingsForm : Form
         int tab = 0;
         foreach (var control in new Control[]
                  {
-                     _languageCombo, _modeCombo,
+                     _languageCombo, _modeCombo, _opacity,
                      _formatCombo, _qualityCombo, _fps, _gifFps, _audioCombo,
                      _systemGain, _micGain, _mouseCombo,
                      _hotStart, _hotStop, _hotPause, _hotShowPanel,
@@ -278,6 +283,7 @@ public sealed class SettingsForm : Form
         _hotkeyScreenshotWindowLabel.Text = Localization.T("settings_hotkey_screenshot_window");
         _hotkeyScreenshotScrollLabel.Text = Localization.T("settings_hotkey_screenshot_scroll");
         _modeLabel.Text = Localization.T("settings_start_mode");
+        _opacityLabel.Text = Localization.T("settings_panel_opacity");
         _hint.Text = Localization.T("settings_hint_hotkey");
         _save.Text = Localization.T("settings_save");
         _cancel.Text = Localization.T("settings_cancel");
@@ -326,6 +332,7 @@ public sealed class SettingsForm : Form
         _gifFps.Value = Math.Clamp(_result.GifFps, 5, 30);
         _systemGain.Value = Math.Clamp(_result.SystemLevelGain, 1, 10);
         _micGain.Value = Math.Clamp(_result.MicLevelGain, 1, 10);
+        _opacity.Value = Math.Clamp(_result.PanelOpacity, 20, 100);
         UpdateFormatDependentState();
         _outputText.Text = _result.OutputFolder;
         _ffmpegText.Text = _result.FfmpegPath;
@@ -416,6 +423,7 @@ public sealed class SettingsForm : Form
         _result.GifFps = (int)_gifFps.Value;
         _result.SystemLevelGain = (int)_systemGain.Value;
         _result.MicLevelGain = (int)_micGain.Value;
+        _result.PanelOpacity = (int)_opacity.Value;
         _result.OutputFolder = _outputText.Text.Trim();
         _result.FfmpegPath = _ffmpegText.Text.Trim();
 

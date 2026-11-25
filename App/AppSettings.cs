@@ -12,6 +12,7 @@ public sealed class AppSettings
     public int MicVolume { get; set; } = 100;
     public int SystemLevelGain { get; set; } = 3;
     public int MicLevelGain { get; set; } = 4;
+    public int PanelOpacity { get; set; } = 90;
     public string OutputFolder { get; set; } = string.Empty;
     public string FfmpegPath { get; set; } = string.Empty;
     public string StartMode { get; set; } = "fullscreen";

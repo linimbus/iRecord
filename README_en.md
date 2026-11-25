@@ -12,7 +12,7 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
   - Full screen (the monitor under the mouse)
   - Region (drag to select)
   - Window (hover to highlight, click to select)
-- Screenshots: region screenshots (select multiple regions and merge them into one image), window screenshots, and scrolling window screenshots that auto-scroll and stitch seamlessly into one PNG; all are saved to disk and copied to the clipboard automatically
+- Screenshots: region screenshots (single selection), multi-region screenshots (select several regions and merge them into one image), window screenshots, and scrolling window screenshots that auto-scroll and stitch seamlessly into one PNG; all are saved to disk and copied to the clipboard automatically
 - The control panel groups the pin, screenshot and recording actions, separated by vertical dividers
 - The control panel has an always-on-top (pin) button so it stays above other windows
 - Output formats: `MP4` (H.264), `MKV` (H.264), `MOV` (H.264), `WebM` (VP9 + Opus) or `GIF`
@@ -46,7 +46,7 @@ If it is not found on first launch, a tray notification appears. Set the path un
 
 ## Usage
 
-1. Run `iRecord.exe`; a foreground control panel appears: an always-on-top pin button on the far left, then screenshots (region / window / scrolling long screenshot), recording (full screen / region / window), plus settings and open-folder. Region screenshots let you select multiple regions and press Enter to merge them vertically into one image. The app also stays in the system tray (bottom right); closing the panel hides it to the tray, and double-clicking the tray icon reopens it. Both screenshots and recordings are saved to the configured output folder.
+1. Run `iRecord.exe`; a foreground control panel appears: an always-on-top pin button on the far left, then screenshots (region / multi-region / window / scrolling long screenshot), recording (full screen / region / window), plus settings and open-folder. Region screenshots capture a single selection; multi-region screenshots let you select several regions and press Enter to merge them vertically into one image. The app also stays in the system tray (bottom right); closing the panel hides it to the tray, and double-clicking the tray icon reopens it. Both screenshots and recordings are saved to the configured output folder.
 2. Right-click the tray icon and choose:
    - Start recording (full screen / region / window)
    - Screenshots (region / window / scrolling long screenshot)

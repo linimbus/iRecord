@@ -72,6 +72,7 @@ public static class SettingsStore
         s.MicVolume = Math.Clamp(s.MicVolume, 0, 200);
         s.SystemLevelGain = Math.Clamp(s.SystemLevelGain, 1, 10);
         s.MicLevelGain = Math.Clamp(s.MicLevelGain, 1, 10);
+        s.PanelOpacity = Math.Clamp(s.PanelOpacity, 20, 100);
 
         if (string.IsNullOrWhiteSpace(s.OutputFolder))
             s.OutputFolder = CreateDefault().OutputFolder;
