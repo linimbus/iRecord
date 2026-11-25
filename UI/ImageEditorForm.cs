@@ -73,6 +73,9 @@ public sealed class ImageEditorForm : Form
     private int _nextNumber = 1;
     private bool _dragging;
     private bool _closing;
+    private bool _windowDragging;
+    private Point _windowDragStartCursor;
+    private Point _windowDragStartLocation;
     private Point _startImage;
     private Point _currentImage;
     private TextBox? _inlineInput;
@@ -109,7 +112,9 @@ public sealed class ImageEditorForm : Form
         _displayScaleX = _displayWidth / (double)image.Width;
         _displayScaleY = _displayHeight / (double)image.Height;
 
-        ClientSize = new Size(_displayWidth + 2, _displayHeight + 2);
+        int frame = Dpi.S(6);
+        Padding = new Padding(frame);
+        ClientSize = new Size(_displayWidth + 2 + frame * 2, _displayHeight + 2 + frame * 2);
 
         int left = area.Left + (area.Width - Width) / 2;
         int top = area.Top + (area.Height - Height) / 2;
@@ -118,7 +123,8 @@ public sealed class ImageEditorForm : Form
         _canvas = new EditorCanvas(this)
         {
             Dock = DockStyle.Fill,
-            BackColor = BorderColor
+            BackColor = BorderColor,
+            Cursor = Cursors.Default
         };
         Controls.Add(_canvas);
 
@@ -128,6 +134,7 @@ public sealed class ImageEditorForm : Form
         _toast.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
         _toast.Padding = new Padding(Dpi.S(10), Dpi.S(6), Dpi.S(10), Dpi.S(6));
         _toast.Visible = false;
+        _toast.Cursor = Cursors.Default;
         Controls.Add(_toast);
         _toast.BringToFront();
 
@@ -155,6 +162,94 @@ public sealed class ImageEditorForm : Form
         _toolbar.SetActiveTool(_tool);
         _toolbar.SetColor(_color);
         PositionToolbar();
+    }
+
+    protected override void OnMouseEnter(EventArgs e)
+    {
+        base.OnMouseEnter(e);
+        UpdateEditorCursor();
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        if (!_windowDragging)
+            Cursor = Cursors.Default;
+        base.OnMouseLeave(e);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            _windowDragging = true;
+            _windowDragStartCursor = Cursor.Position;
+            _windowDragStartLocation = Location;
+            Capture = true;
+            Cursor = Cursors.SizeAll;
+            return;
+        }
+
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if (_windowDragging)
+        {
+            var point = Cursor.Position;
+            int x = _windowDragStartLocation.X + point.X - _windowDragStartCursor.X;
+            int y = _windowDragStartLocation.Y + point.Y - _windowDragStartCursor.Y;
+            var area = SystemInformation.VirtualScreen;
+            x = Math.Clamp(x, area.Left - Width + Dpi.S(60), area.Right - Dpi.S(60));
+            y = Math.Clamp(y, area.Top, area.Bottom - Dpi.S(40));
+
+            int dx = x - Left;
+            int dy = y - Top;
+            Location = new Point(x, y);
+            if (dx != 0 || dy != 0)
+                _toolbar?.MoveBy(dx, dy);
+            return;
+        }
+
+        UpdateEditorCursor();
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (_windowDragging && e.Button == MouseButtons.Left)
+        {
+            _windowDragging = false;
+            Capture = false;
+            UpdateEditorCursor();
+            return;
+        }
+
+        base.OnMouseUp(e);
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        if (!Capture && _windowDragging)
+        {
+            _windowDragging = false;
+            UpdateEditorCursor();
+        }
+
+        base.OnMouseCaptureChanged(e);
+    }
+
+    private void UpdateEditorCursor()
+    {
+        if (_windowDragging)
+        {
+            Cursor = Cursors.SizeAll;
+            return;
+        }
+
+        var point = PointToClient(Cursor.Position);
+        bool overFrame = ClientRectangle.Contains(point) && !_canvas.Bounds.Contains(point);
+        Cursor = overFrame ? Cursors.SizeAll : Cursors.Default;
     }
 
     private void PositionToolbar()
@@ -1378,6 +1473,19 @@ public sealed class ImageEditorForm : Form
 
             int width = x - gap + padding;
             ClientSize = new Size(width, Dpi.S(44));
+        }
+
+        public void MoveBy(int dx, int dy)
+        {
+            if (dx == 0 && dy == 0)
+                return;
+
+            var area = SystemInformation.VirtualScreen;
+            int x = Math.Clamp(Location.X + dx, area.Left,
+                Math.Max(area.Left, area.Right - Width));
+            int y = Math.Clamp(Location.Y + dy, area.Top,
+                Math.Max(area.Top, area.Bottom - Height));
+            Location = new Point(x, y);
         }
 
         public void SetActiveTool(EditorTool tool)
