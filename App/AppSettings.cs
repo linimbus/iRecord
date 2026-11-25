@@ -18,6 +18,7 @@ public sealed class AppSettings
     public string HotkeyStart { get; set; } = "F9";
     public string HotkeyStop { get; set; } = "F10";
     public string HotkeyPause { get; set; } = "F11";
+    public string HotkeyShowPanel { get; set; } = string.Empty;
     public string HotkeyScreenshotRegion { get; set; } = string.Empty;
     public string HotkeyScreenshotWindow { get; set; } = string.Empty;
     public string HotkeyScreenshotScroll { get; set; } = string.Empty;

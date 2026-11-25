@@ -58,7 +58,7 @@ public sealed class MainPanelForm : Form
         Font = new Font("Segoe UI", 9f);
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
-        Size = new Size(Dpi.S(356), Dpi.S(56));
+        Size = new Size(Dpi.S(328), Dpi.S(40));
 
         _pin = CreateButton(IconKind.Pin, "panel_pin");
         _screenshotRegion = CreateButton(IconKind.ScreenshotRegion, "screenshot_region");
@@ -116,8 +116,8 @@ public sealed class MainPanelForm : Form
     {
         int size = Dpi.S(20);
         int gap = Dpi.S(8);
-        int dividerGap = Dpi.S(10);
-        int padding = Dpi.S(16);
+        int dividerGap = Dpi.S(8);
+        int padding = Dpi.S(10);
         int y = (ClientSize.Height - size) / 2;
 
         _dividerXs.Clear();
@@ -221,7 +221,7 @@ public sealed class MainPanelForm : Form
         {
             using var divider = new Pen(Color.FromArgb(55, 255, 255, 255), 1.2f * Dpi.Scale);
             foreach (int dividerX in _dividerXs)
-                g.DrawLine(divider, dividerX, Dpi.S(16), dividerX, Height - Dpi.S(16));
+                g.DrawLine(divider, dividerX, Dpi.S(10), dividerX, Height - Dpi.S(10));
         }
     }
 

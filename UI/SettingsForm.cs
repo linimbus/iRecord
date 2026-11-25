@@ -25,6 +25,7 @@ public sealed class SettingsForm : Form
     private readonly Label _hotkeyStartLabel = new();
     private readonly Label _hotkeyStopLabel = new();
     private readonly Label _hotkeyPauseLabel = new();
+    private readonly Label _hotkeyShowPanelLabel = new();
     private readonly Label _hotkeyScreenshotRegionLabel = new();
     private readonly Label _hotkeyScreenshotWindowLabel = new();
     private readonly Label _hotkeyScreenshotScrollLabel = new();
@@ -46,6 +47,7 @@ public sealed class SettingsForm : Form
     private readonly HotkeyBox _hotStart = new();
     private readonly HotkeyBox _hotStop = new();
     private readonly HotkeyBox _hotPause = new();
+    private readonly HotkeyBox _hotShowPanel = new();
     private readonly HotkeyBox _hotScreenshotRegion = new();
     private readonly HotkeyBox _hotScreenshotWindow = new();
     private readonly HotkeyBox _hotScreenshotScroll = new();
@@ -81,11 +83,14 @@ public sealed class SettingsForm : Form
     private void BuildUi()
     {
         const int margin = 20;
-        const int contentW = 620;
-        const int labelX = 20;
+        const int contentW = 740;
         const int labelW = 150;
-        const int fieldX = 180;
-        const int fieldW = 300;
+        const int leftLabelX = 20;
+        const int leftFieldX = 178;
+        const int rightLabelX = 402;
+        const int rightFieldX = 560;
+        const int fieldW = 200;
+        const int columnW = 358;
         const int rowH = 30;
         const int controlH = 26;
 
@@ -100,85 +105,90 @@ public sealed class SettingsForm : Form
 
         int y = 16;
 
-        void Section(Label header, Control separator)
+        void Section(Label header, Control separator, int x, int width, ref int rowY)
         {
             header.AutoSize = false;
             header.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
             header.ForeColor = Color.FromArgb(64, 64, 64);
             header.TextAlign = ContentAlignment.MiddleLeft;
-            header.Bounds = Dpi.R(labelX, y, contentW, 22);
-            y += 24;
-            separator.Bounds = Dpi.R(labelX, y, contentW, 1);
-            y += 10;
+            header.Bounds = Dpi.R(x, rowY, width, 22);
+            rowY += 24;
+            separator.Bounds = Dpi.R(x, rowY, width, 1);
+            rowY += 10;
         }
 
-        void Row(Label label, Control field)
+        void Row(Label label, Control field, int labelX, int fieldX, int width, ref int rowY)
         {
             label.AutoSize = false;
             label.TextAlign = ContentAlignment.MiddleLeft;
-            label.Bounds = Dpi.R(labelX, y, labelW, controlH);
-            field.Bounds = Dpi.R(fieldX, y, fieldW, controlH);
-            y += rowH;
+            label.Bounds = Dpi.R(labelX, rowY, labelW, controlH);
+            field.Bounds = Dpi.R(fieldX, rowY, width, controlH);
+            rowY += rowH;
         }
 
-        Section(_generalHeader, generalSep);
-        Row(_languageLabel, _languageCombo);
-        Row(_modeLabel, _modeCombo);
+        Section(_generalHeader, generalSep, leftLabelX, contentW, ref y);
+        Row(_languageLabel, _languageCombo, leftLabelX, leftFieldX, 300, ref y);
+        Row(_modeLabel, _modeCombo, leftLabelX, leftFieldX, 300, ref y);
         y += 12;
 
-        Section(_recordingHeader, recordingSep);
-        Row(_formatLabel, _formatCombo);
-        Row(_qualityLabel, _qualityCombo);
-        Row(_fpsLabel, _fps);
-        Row(_gifFpsLabel, _gifFps);
-        Row(_audioLabel, _audioCombo);
-        Row(_systemGainLabel, _systemGain);
-        Row(_micGainLabel, _micGain);
-        Row(_mouseLabel, _mouseCombo);
-        y += 12;
+        int leftY = y;
+        int rightY = y;
 
-        Section(_outputHeader, outputSep);
+        Section(_recordingHeader, recordingSep, leftLabelX, columnW, ref leftY);
+        Row(_formatLabel, _formatCombo, leftLabelX, leftFieldX, fieldW, ref leftY);
+        Row(_qualityLabel, _qualityCombo, leftLabelX, leftFieldX, fieldW, ref leftY);
+        Row(_fpsLabel, _fps, leftLabelX, leftFieldX, fieldW, ref leftY);
+        Row(_gifFpsLabel, _gifFps, leftLabelX, leftFieldX, fieldW, ref leftY);
+        Row(_audioLabel, _audioCombo, leftLabelX, leftFieldX, fieldW, ref leftY);
+        Row(_systemGainLabel, _systemGain, leftLabelX, leftFieldX, fieldW, ref leftY);
+        Row(_micGainLabel, _micGain, leftLabelX, leftFieldX, fieldW, ref leftY);
+        Row(_mouseLabel, _mouseCombo, leftLabelX, leftFieldX, fieldW, ref leftY);
+
+        Section(_hotkeysHeader, hotkeysSep, rightLabelX, columnW, ref rightY);
+        Row(_hotkeyStartLabel, _hotStart, rightLabelX, rightFieldX, fieldW, ref rightY);
+        Row(_hotkeyStopLabel, _hotStop, rightLabelX, rightFieldX, fieldW, ref rightY);
+        Row(_hotkeyPauseLabel, _hotPause, rightLabelX, rightFieldX, fieldW, ref rightY);
+        Row(_hotkeyShowPanelLabel, _hotShowPanel, rightLabelX, rightFieldX, fieldW, ref rightY);
+        Row(_hotkeyScreenshotRegionLabel, _hotScreenshotRegion, rightLabelX, rightFieldX, fieldW, ref rightY);
+        Row(_hotkeyScreenshotWindowLabel, _hotScreenshotWindow, rightLabelX, rightFieldX, fieldW, ref rightY);
+        Row(_hotkeyScreenshotScrollLabel, _hotScreenshotScroll, rightLabelX, rightFieldX, fieldW, ref rightY);
+
+        _hint.AutoSize = false;
+        _hint.ForeColor = Color.DimGray;
+        _hint.Bounds = Dpi.R(rightLabelX, rightY + 6, columnW, 24);
+        rightY += 30;
+
+        y = Math.Max(leftY, rightY) + 12;
+
+        Section(_outputHeader, outputSep, leftLabelX, contentW, ref y);
 
         _outputLabel.AutoSize = false;
         _outputLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _outputLabel.Bounds = Dpi.R(labelX, y, labelW, controlH);
-        _outputText.Bounds = Dpi.R(fieldX, y, fieldW, controlH);
-        var browseOutput = new Button { Bounds = Dpi.R(fieldX + fieldW + 8, y, 100, controlH) };
+        _outputLabel.Bounds = Dpi.R(leftLabelX, y, labelW, controlH);
+        _outputText.Bounds = Dpi.R(leftFieldX, y, 400, controlH);
+        var browseOutput = new Button { Bounds = Dpi.R(586, y, 100, controlH) };
         browseOutput.Click += (_, _) => BrowseOutput();
         _browseOutput = browseOutput;
         y += rowH;
 
         _ffmpegLabel.AutoSize = false;
         _ffmpegLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _ffmpegLabel.Bounds = Dpi.R(labelX, y, labelW, controlH);
-        _ffmpegText.Bounds = Dpi.R(fieldX, y, 200, controlH);
-        var browseFfmpeg = new Button { Bounds = Dpi.R(fieldX + 208, y, 100, controlH) };
+        _ffmpegLabel.Bounds = Dpi.R(leftLabelX, y, labelW, controlH);
+        _ffmpegText.Bounds = Dpi.R(leftFieldX, y, 260, controlH);
+        var browseFfmpeg = new Button { Bounds = Dpi.R(446, y, 100, controlH) };
         browseFfmpeg.Click += (_, _) => BrowseFfmpeg();
         _browseFfmpeg = browseFfmpeg;
-        var detect = new Button { Bounds = Dpi.R(fieldX + 316, y, 124, controlH) };
+        var detect = new Button { Bounds = Dpi.R(554, y, 124, controlH) };
         detect.Click += (_, _) => DetectFfmpeg();
         _detectFfmpeg = detect;
         y += rowH + 12;
 
-        Section(_hotkeysHeader, hotkeysSep);
-        Row(_hotkeyStartLabel, _hotStart);
-        Row(_hotkeyStopLabel, _hotStop);
-        Row(_hotkeyPauseLabel, _hotPause);
-        Row(_hotkeyScreenshotRegionLabel, _hotScreenshotRegion);
-        Row(_hotkeyScreenshotWindowLabel, _hotScreenshotWindow);
-        Row(_hotkeyScreenshotScrollLabel, _hotScreenshotScroll);
-
-        _hint.AutoSize = false;
-        _hint.ForeColor = Color.DimGray;
-        _hint.Bounds = Dpi.R(labelX, y, contentW, 24);
-        y += 34;
-
-        footerSep.Bounds = Dpi.R(labelX, y, contentW, 1);
+        footerSep.Bounds = Dpi.R(leftLabelX, y, contentW, 1);
         y += 12;
 
-        _save.Bounds = Dpi.R(412, y, 110, 34);
+        _save.Bounds = Dpi.R(532, y, 110, 34);
         _save.Click += (_, _) => Save();
-        _cancel.Bounds = Dpi.R(530, y, 110, 34);
+        _cancel.Bounds = Dpi.R(650, y, 110, 34);
         _cancel.DialogResult = DialogResult.Cancel;
         y += 34 + 16;
 
@@ -200,24 +210,29 @@ public sealed class SettingsForm : Form
         Controls.AddRange(new Control[]
         {
             _generalHeader, generalSep, _recordingHeader, recordingSep,
-            _outputHeader, outputSep, _hotkeysHeader, hotkeysSep, footerSep,
-            _languageLabel, _modeLabel, _formatLabel, _qualityLabel, _fpsLabel, _gifFpsLabel,
-            _audioLabel, _systemGainLabel, _micGainLabel, _mouseLabel, _outputLabel, _ffmpegLabel,
-            _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel,
+            _hotkeysHeader, hotkeysSep, _outputHeader, outputSep, footerSep,
+            _languageLabel, _modeLabel,
+            _formatLabel, _qualityLabel, _fpsLabel, _gifFpsLabel, _audioLabel,
+            _systemGainLabel, _micGainLabel, _mouseLabel,
+            _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel, _hotkeyShowPanelLabel,
             _hotkeyScreenshotRegionLabel, _hotkeyScreenshotWindowLabel, _hotkeyScreenshotScrollLabel, _hint,
+            _outputLabel, _ffmpegLabel,
             _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
-            _audioCombo, _systemGain, _micGain, _mouseCombo, _outputText, _ffmpegText,
-            _hotStart, _hotStop, _hotPause, _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll,
-            browseOutput, browseFfmpeg, detect, _save, _cancel
+            _audioCombo, _systemGain, _micGain, _mouseCombo,
+            _hotStart, _hotStop, _hotPause, _hotShowPanel,
+            _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll,
+            _outputText, _ffmpegText, browseOutput, browseFfmpeg, detect, _save, _cancel
         });
 
         int tab = 0;
         foreach (var control in new Control[]
                  {
-                     _languageCombo, _modeCombo, _formatCombo, _qualityCombo, _fps, _gifFps,
-                     _audioCombo, _systemGain, _micGain, _mouseCombo, _outputText, browseOutput, _ffmpegText,
-                     browseFfmpeg, detect, _hotStart, _hotStop, _hotPause,
-                     _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll, _save, _cancel
+                     _languageCombo, _modeCombo,
+                     _formatCombo, _qualityCombo, _fps, _gifFps, _audioCombo,
+                     _systemGain, _micGain, _mouseCombo,
+                     _hotStart, _hotStop, _hotPause, _hotShowPanel,
+                     _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll,
+                     _outputText, browseOutput, _ffmpegText, browseFfmpeg, detect, _save, _cancel
                  })
             control.TabIndex = tab++;
 
@@ -258,6 +273,7 @@ public sealed class SettingsForm : Form
         _hotkeyStartLabel.Text = Localization.T("settings_hotkey_start");
         _hotkeyStopLabel.Text = Localization.T("settings_hotkey_stop");
         _hotkeyPauseLabel.Text = Localization.T("settings_hotkey_pause");
+        _hotkeyShowPanelLabel.Text = Localization.T("settings_hotkey_show_panel");
         _hotkeyScreenshotRegionLabel.Text = Localization.T("settings_hotkey_screenshot_region");
         _hotkeyScreenshotWindowLabel.Text = Localization.T("settings_hotkey_screenshot_window");
         _hotkeyScreenshotScrollLabel.Text = Localization.T("settings_hotkey_screenshot_scroll");
@@ -316,6 +332,7 @@ public sealed class SettingsForm : Form
         _hotStart.Text = _result.HotkeyStart;
         _hotStop.Text = _result.HotkeyStop;
         _hotPause.Text = _result.HotkeyPause;
+        _hotShowPanel.Text = _result.HotkeyShowPanel;
         _hotScreenshotRegion.Text = _result.HotkeyScreenshotRegion;
         _hotScreenshotWindow.Text = _result.HotkeyScreenshotWindow;
         _hotScreenshotScroll.Text = _result.HotkeyScreenshotScroll;
@@ -405,6 +422,7 @@ public sealed class SettingsForm : Form
         if (!ValidateHotkey(_hotStart.Text, "settings_hotkey_start")) return;
         if (!ValidateHotkey(_hotStop.Text, "settings_hotkey_stop")) return;
         if (!ValidateHotkey(_hotPause.Text, "settings_hotkey_pause")) return;
+        if (!ValidateHotkey(_hotShowPanel.Text, "settings_hotkey_show_panel")) return;
         if (!ValidateHotkey(_hotScreenshotRegion.Text, "settings_hotkey_screenshot_region")) return;
         if (!ValidateHotkey(_hotScreenshotWindow.Text, "settings_hotkey_screenshot_window")) return;
         if (!ValidateHotkey(_hotScreenshotScroll.Text, "settings_hotkey_screenshot_scroll")) return;
@@ -412,6 +430,7 @@ public sealed class SettingsForm : Form
         _result.HotkeyStart = _hotStart.Text.Trim();
         _result.HotkeyStop = _hotStop.Text.Trim();
         _result.HotkeyPause = _hotPause.Text.Trim();
+        _result.HotkeyShowPanel = _hotShowPanel.Text.Trim();
         _result.HotkeyScreenshotRegion = _hotScreenshotRegion.Text.Trim();
         _result.HotkeyScreenshotWindow = _hotScreenshotWindow.Text.Trim();
         _result.HotkeyScreenshotScroll = _hotScreenshotScroll.Text.Trim();

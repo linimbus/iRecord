@@ -168,6 +168,20 @@ public sealed class TrayApplicationContext : ApplicationContext
         var exit = new ToolStripMenuItem(Localization.T("tray_exit"));
         exit.Click += (_, _) => ExitApplication();
 
+        static void SetShortcut(ToolStripMenuItem item, string? text)
+            => item.ShortcutKeyDisplayString = string.IsNullOrWhiteSpace(text) ? string.Empty : text.Trim();
+
+        SetShortcut(showPanel, _settings.HotkeyShowPanel);
+        string startMode = _settings.StartMode;
+        SetShortcut(startFull, string.Equals(startMode, "fullscreen", StringComparison.OrdinalIgnoreCase) ? _settings.HotkeyStart : null);
+        SetShortcut(startRegion, string.Equals(startMode, "region", StringComparison.OrdinalIgnoreCase) ? _settings.HotkeyStart : null);
+        SetShortcut(startWindow, string.Equals(startMode, "window", StringComparison.OrdinalIgnoreCase) ? _settings.HotkeyStart : null);
+        SetShortcut(screenshotRegion, _settings.HotkeyScreenshotRegion);
+        SetShortcut(screenshotWindow, _settings.HotkeyScreenshotWindow);
+        SetShortcut(screenshotScroll, _settings.HotkeyScreenshotScroll);
+        SetShortcut(pause, _settings.HotkeyPause);
+        SetShortcut(stop, _settings.HotkeyStop);
+
         _menu.Items.Add(showPanel);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(startFull);
@@ -227,6 +241,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         Register("start", _settings.HotkeyStart);
         Register("stop", _settings.HotkeyStop);
         Register("pause", _settings.HotkeyPause);
+        Register("show-panel", _settings.HotkeyShowPanel);
         Register("screenshot-region", _settings.HotkeyScreenshotRegion);
         Register("screenshot-window", _settings.HotkeyScreenshotWindow);
         Register("screenshot-scroll", _settings.HotkeyScreenshotScroll);
@@ -253,6 +268,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         else if (action == "pause")
         {
             TogglePause();
+        }
+        else if (action == "show-panel")
+        {
+            ShowMainPanel();
         }
         else if (action == "screenshot-region")
         {
