@@ -28,6 +28,14 @@ public sealed class ImageEditorForm : Form
         Mosaic
     }
 
+    private enum LineThickness
+    {
+        Thin,
+        Medium,
+        Thick,
+        ExtraThick
+    }
+
     private enum EditorIcon
     {
         Text,
@@ -59,7 +67,9 @@ public sealed class ImageEditorForm : Form
     private EditorTool _tool = EditorTool.Rectangle;
     private Color _color = Color.FromArgb(255, 64, 64);
     private string _textFontFamily = "Segoe UI";
+    private FontStyle _textFontStyle = FontStyle.Bold;
     private int _textFontSize;
+    private LineThickness _lineThickness = LineThickness.Medium;
     private int _nextNumber = 1;
     private bool _dragging;
     private bool _closing;
@@ -76,7 +86,7 @@ public sealed class ImageEditorForm : Form
     {
         _image = image;
         _path = path;
-        _textFontSize = Math.Clamp((int)Math.Round(Math.Min(image.Width, image.Height) / 30.0), 16, 96);
+        _textFontSize = Math.Clamp((int)Math.Round(Math.Min(image.Width, image.Height) / 20.0), 20, 120);
 
         Text = Localization.T("editor_title");
         FormBorderStyle = FormBorderStyle.None;
@@ -177,8 +187,8 @@ public sealed class ImageEditorForm : Form
             string.Equals(family, _textFontFamily, StringComparison.OrdinalIgnoreCase))
             return;
 
-        CommitInlineTextIfAny();
         _textFontFamily = family;
+        RefreshInlineTextStyle();
     }
 
     private void SetTextSize(int size)
@@ -187,8 +197,65 @@ public sealed class ImageEditorForm : Form
         if (size == _textFontSize)
             return;
 
-        CommitInlineTextIfAny();
         _textFontSize = size;
+        RefreshInlineTextStyle();
+    }
+
+    private void SetTextStyle(FontStyle style)
+    {
+        if (style == _textFontStyle)
+            return;
+
+        _textFontStyle = style;
+        RefreshInlineTextStyle();
+    }
+
+    private void SetLineThickness(LineThickness thickness)
+    {
+        _lineThickness = thickness;
+    }
+
+    private int LineWidth()
+    {
+        int medium = Math.Clamp((int)Math.Round(Math.Min(_image.Width, _image.Height) / 220.0), 2, 10);
+        float factor = _lineThickness switch
+        {
+            LineThickness.Thin => 0.6f,
+            LineThickness.Thick => 1.6f,
+            LineThickness.ExtraThick => 2.4f,
+            _ => 1f
+        };
+        return Math.Clamp((int)Math.Round(medium * factor), 1, 32);
+    }
+
+    private float PreviewLineWidth()
+    {
+        float scale = (float)Math.Min(_displayScaleX, _displayScaleY);
+        return Math.Max(1.5f, LineWidth() * scale);
+    }
+
+    private void RefreshInlineTextStyle()
+    {
+        if (_inlineInput == null || _inlineOverlay == null)
+            return;
+
+        UpdateInlineTextLayout();
+        _inlineOverlay.Invalidate();
+    }
+
+    private void FocusInlineTextInput()
+    {
+        if (_inlineInput == null || _inlineInput.IsDisposed || _inlineClosing)
+            return;
+
+        int start = _inlineInput.SelectionStart;
+        int length = _inlineInput.SelectionLength;
+        if (!ContainsFocus)
+            Activate();
+        _inlineInput.Focus();
+        _inlineInput.SelectionStart = start;
+        _inlineInput.SelectionLength = length;
+        _inlineOverlay?.Invalidate();
     }
 
     private void PickColor()
@@ -368,7 +435,7 @@ public sealed class ImageEditorForm : Form
         string[] lines = text.Split('\n');
         using var g = _canvas.CreateGraphics();
         using var font = new Font(_textFontFamily, _textFontSize * (float)_displayScaleY,
-            FontStyle.Bold, GraphicsUnit.Pixel);
+            _textFontStyle, GraphicsUnit.Pixel);
 
         float maxWidth = 0;
         foreach (var line in lines)
@@ -415,7 +482,7 @@ public sealed class ImageEditorForm : Form
         string[] lines = text.Split('\n');
         int imageFont = _textFontSize;
         using var font = new Font(_textFontFamily, imageFont * (float)_displayScaleY,
-            FontStyle.Bold, GraphicsUnit.Pixel);
+            _textFontStyle, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(_color);
         using var shadow = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
         int offset = Math.Max(1, (int)Math.Round(Math.Max(1, imageFont / 14.0) * _displayScaleY));
@@ -550,7 +617,7 @@ public sealed class ImageEditorForm : Form
         PointF a = ToDisplay(_startImage);
         PointF b = ToDisplay(_currentImage);
 
-        using var pen = new Pen(_color, 2f) { DashStyle = DashStyle.Dash };
+        using var pen = new Pen(_color, PreviewLineWidth()) { DashStyle = DashStyle.Dash };
 
         switch (_tool)
         {
@@ -609,7 +676,7 @@ public sealed class ImageEditorForm : Form
 
     private Pen CreatePen(bool dashed)
     {
-        int width = Math.Clamp((int)Math.Round(Math.Min(_image.Width, _image.Height) / 220.0), 2, 10);
+        int width = LineWidth();
         var pen = new Pen(_color, width)
         {
             StartCap = LineCap.Round,
@@ -624,7 +691,7 @@ public sealed class ImageEditorForm : Form
     private void DrawText(Graphics g, string text, Point location)
     {
         int fontSize = _textFontSize;
-        using var font = new Font(_textFontFamily, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var font = new Font(_textFontFamily, fontSize, _textFontStyle, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(_color);
         using var shadow = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
 
@@ -646,7 +713,7 @@ public sealed class ImageEditorForm : Form
         using var brush = new SolidBrush(_color);
         g.FillEllipse(brush, rect);
 
-        using var font = new Font(_textFontFamily, diameter * 0.5f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var font = new Font(_textFontFamily, diameter * 0.5f, _textFontStyle, GraphicsUnit.Pixel);
         using var format = new StringFormat
         {
             Alignment = StringAlignment.Center,
@@ -1078,6 +1145,22 @@ public sealed class ImageEditorForm : Form
         private readonly IconToolButton _colorButton = new(EditorIcon.Color);
         private readonly ComboBox _fontCombo = new();
         private readonly NumericUpDown _sizeBox = new();
+        private readonly ComboBox _styleCombo = new();
+        private readonly ComboBox _lineWidthCombo = new();
+        private static readonly string[] LineWidthKeys =
+        {
+            "editor_line_thin",
+            "editor_line_medium",
+            "editor_line_thick",
+            "editor_line_extra_thick"
+        };
+        private static readonly (string LabelKey, FontStyle Style)[] FontStyles =
+        {
+            ("editor_style_regular", FontStyle.Regular),
+            ("editor_style_bold", FontStyle.Bold),
+            ("editor_style_italic", FontStyle.Italic),
+            ("editor_style_bold_italic", FontStyle.Bold | FontStyle.Italic)
+        };
         private readonly ToolTip _toolTip = new()
         {
             AutoPopDelay = 6000,
@@ -1132,6 +1215,12 @@ public sealed class ImageEditorForm : Form
                 if (_fontCombo.SelectedItem is string selectedFamily)
                     _editor.SetTextFont(selectedFamily);
             };
+            _fontCombo.DropDownClosed += (_, _) => _editor.FocusInlineTextInput();
+            _fontCombo.KeyUp += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                    _editor.FocusInlineTextInput();
+            };
 
             _sizeBox.Minimum = 8;
             _sizeBox.Maximum = 200;
@@ -1139,8 +1228,62 @@ public sealed class ImageEditorForm : Form
             _sizeBox.Font = new Font("Segoe UI", 9f);
             _sizeBox.Value = Math.Clamp(_editor._textFontSize, 8, 200);
             _sizeBox.ValueChanged += (_, _) => _editor.SetTextSize((int)_sizeBox.Value);
+            _sizeBox.MouseUp += (_, e) =>
+            {
+                if (e.X >= _sizeBox.ClientSize.Width - Dpi.S(20))
+                    _editor.FocusInlineTextInput();
+            };
+            _sizeBox.KeyUp += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                    _editor.FocusInlineTextInput();
+            };
             _toolTip.SetToolTip(_sizeBox, Localization.T("editor_font_size"));
             Controls.Add(_sizeBox);
+
+            _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            _styleCombo.Font = new Font("Segoe UI", 9f);
+            _styleCombo.DropDownWidth = Dpi.S(160);
+            foreach (var entry in FontStyles)
+                _styleCombo.Items.Add(Localization.T(entry.LabelKey));
+            int styleIndex = Array.FindIndex(FontStyles, s => s.Style == _editor._textFontStyle);
+            if (styleIndex < 0) styleIndex = 1;
+            _styleCombo.SelectedIndex = styleIndex;
+            _styleCombo.SelectedIndexChanged += (_, _) =>
+            {
+                int index = _styleCombo.SelectedIndex;
+                if (index >= 0)
+                    _editor.SetTextStyle(FontStyles[index].Style);
+            };
+            _styleCombo.DropDownClosed += (_, _) => _editor.FocusInlineTextInput();
+            _styleCombo.KeyUp += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                    _editor.FocusInlineTextInput();
+            };
+            _toolTip.SetToolTip(_styleCombo, Localization.T("editor_font_style"));
+            Controls.Add(_styleCombo);
+
+            _lineWidthCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            _lineWidthCombo.Font = new Font("Segoe UI", 9f);
+            _lineWidthCombo.DropDownWidth = Dpi.S(140);
+            foreach (var key in LineWidthKeys)
+                _lineWidthCombo.Items.Add(Localization.T(key));
+            _lineWidthCombo.SelectedIndex = (int)_editor._lineThickness;
+            _lineWidthCombo.SelectedIndexChanged += (_, _) =>
+            {
+                int index = _lineWidthCombo.SelectedIndex;
+                if (index >= 0)
+                    _editor.SetLineThickness((LineThickness)index);
+            };
+            _lineWidthCombo.DropDownClosed += (_, _) => _editor.FocusInlineTextInput();
+            _lineWidthCombo.KeyUp += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                    _editor.FocusInlineTextInput();
+            };
+            _toolTip.SetToolTip(_lineWidthCombo, Localization.T("editor_line_width"));
+            Controls.Add(_lineWidthCombo);
 
             _colorButton.Click += (_, _) => _editor.PickColor();
             _toolTip.SetToolTip(_colorButton, Localization.T("editor_color"));
@@ -1218,10 +1361,14 @@ public sealed class ImageEditorForm : Form
             }
 
             x += Dpi.S(4);
-            _fontCombo.Bounds = new Rectangle(x, controlY, Dpi.S(150), controlHeight);
-            x += Dpi.S(150) + Dpi.S(6);
-            _sizeBox.Bounds = new Rectangle(x, controlY, Dpi.S(64), controlHeight);
-            x += Dpi.S(64) + Dpi.S(8);
+            _fontCombo.Bounds = new Rectangle(x, controlY, Dpi.S(130), controlHeight);
+            x += Dpi.S(130) + Dpi.S(6);
+            _sizeBox.Bounds = new Rectangle(x, controlY, Dpi.S(54), controlHeight);
+            x += Dpi.S(54) + Dpi.S(8);
+            _styleCombo.Bounds = new Rectangle(x, controlY, Dpi.S(96), controlHeight);
+            x += Dpi.S(96) + Dpi.S(8);
+            _lineWidthCombo.Bounds = new Rectangle(x, controlY, Dpi.S(84), controlHeight);
+            x += Dpi.S(84) + Dpi.S(8);
 
             foreach (var button in _actionIconButtons)
             {
