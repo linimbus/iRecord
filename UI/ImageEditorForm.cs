@@ -11,21 +11,30 @@ namespace iRecord.UI;
 public sealed class ImageEditorForm : Form
 {
     private static readonly Color BorderColor = Color.FromArgb(208, 214, 222);
+    private static readonly Color WorkspaceColor = Color.FromArgb(54, 58, 66);
     private static readonly Color BarColor = Color.FromArgb(38, 42, 50);
     private static readonly Color HoverColor = Color.FromArgb(54, 60, 70);
     private static readonly Color PressedColor = Color.FromArgb(30, 34, 40);
     private static readonly Color IconColor = Color.FromArgb(224, 232, 242);
     private static readonly Color IconActiveColor = Color.FromArgb(120, 190, 255);
+    private static readonly Lazy<Icon> EditorWindowIcon = new(CreateEditorWindowIcon);
 
     private enum EditorTool
     {
         Rectangle,
         Square,
+        Circle,
+        Ellipse,
+        Star,
+        Heart,
         Text,
         Number,
         Arrow,
         ArrowDashed,
-        Mosaic
+        Freeform,
+        Mosaic,
+        Move,
+        Pan
     }
 
     private enum LineThickness
@@ -41,41 +50,68 @@ public sealed class ImageEditorForm : Form
         Text,
         Rectangle,
         Square,
+        Circle,
+        Ellipse,
+        Star,
+        Heart,
         Number,
         Arrow,
         ArrowDashed,
+        Freeform,
         Mosaic,
+        Move,
+        Pan,
         Color,
         Undo,
         Save,
         Copy,
+        Resize,
+        Ocr,
+        Paint,
+        ZoomIn,
+        ZoomOut,
         Close
     }
 
     private Bitmap _image;
     private string _path;
     private readonly List<Bitmap> _undo = new();
+    private readonly List<ShapeAnnotation> _shapes = new();
+    private readonly List<Point> _freeformPoints = new();
+    private Bitmap? _shapeBase;
+    private ShapeAnnotation? _movingShape;
+    private ShapeAnnotation? _moveOriginal;
+    private Point _moveStartImage;
+    private bool _moveUndoPushed;
+    private bool _filledShapes;
+    private double _zoom = 1.0;
+    private double _viewOffsetX;
+    private double _viewOffsetY;
+    private bool _panning;
+    private Point _panStart;
+    private double _panStartOffsetX;
+    private double _panStartOffsetY;
+    private bool _openPaintAfterClose;
+    private bool _skipSaveOnClose;
     private readonly EditorCanvas _canvas;
+    private readonly Label _statusLabel = new();
     private readonly Label _toast = new();
     private readonly System.Windows.Forms.Timer _toastTimer;
     private readonly int _displayWidth;
     private readonly int _displayHeight;
     private readonly double _displayScaleX;
     private readonly double _displayScaleY;
-    private EditorToolbarForm? _toolbar;
+    private EditorToolbarPanel? _toolbar;
+    private bool _viewInitialized;
 
     private EditorTool _tool = EditorTool.Rectangle;
     private Color _color = Color.FromArgb(255, 64, 64);
     private string _textFontFamily = "Segoe UI";
-    private FontStyle _textFontStyle = FontStyle.Bold;
-    private int _textFontSize;
+    private FontStyle _textFontStyle = FontStyle.Regular;
+    private int _textFontSize = 24;
     private LineThickness _lineThickness = LineThickness.Medium;
     private int _nextNumber = 1;
     private bool _dragging;
-    private bool _closing;
-    private bool _windowDragging;
-    private Point _windowDragStartCursor;
-    private Point _windowDragStartLocation;
     private Point _startImage;
     private Point _currentImage;
     private TextBox? _inlineInput;
@@ -85,25 +121,36 @@ public sealed class ImageEditorForm : Form
     private bool _inlineCaretOn = true;
     private readonly System.Windows.Forms.Timer _inlineCaretTimer;
 
+    private double ViewScaleX => _displayScaleX * _zoom;
+    private double ViewScaleY => _displayScaleY * _zoom;
+    private int EffectiveTextFontSize => Math.Max(1,
+        (int)Math.Round(_textFontSize * (double)Dpi.Scale));
+
     public ImageEditorForm(Bitmap image, string path)
     {
         _image = image;
         _path = path;
-        _textFontSize = Math.Clamp((int)Math.Round(Math.Min(image.Width, image.Height) / 20.0), 20, 120);
 
         Text = Localization.T("editor_title");
-        FormBorderStyle = FormBorderStyle.None;
-        StartPosition = FormStartPosition.Manual;
-        BackColor = BorderColor;
+        Icon = EditorWindowIcon.Value;
+        ShowIcon = true;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        StartPosition = FormStartPosition.CenterScreen;
+        BackColor = WorkspaceColor;
         DoubleBuffered = true;
         Font = new Font("Segoe UI", 9f);
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
         ShowInTaskbar = true;
+        MinimizeBox = true;
+        MaximizeBox = true;
 
+        int toolbarHeight = Dpi.S(76);
+        int statusHeight = Dpi.S(24);
+        int margin = Dpi.S(20);
         var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, image.Width, image.Height);
-        int maxWidth = Math.Max(1, area.Width - Dpi.S(40));
-        int maxHeight = Math.Max(1, area.Height - Dpi.S(120));
+        int maxWidth = Math.Max(1, area.Width - Dpi.S(80) - margin * 2);
+        int maxHeight = Math.Max(1, area.Height - Dpi.S(80) - toolbarHeight - statusHeight - margin * 2);
         double scale = Math.Min(1.0, Math.Min(maxWidth / (double)image.Width, maxHeight / (double)image.Height));
         if (scale <= 0) scale = 1;
 
@@ -112,21 +159,50 @@ public sealed class ImageEditorForm : Form
         _displayScaleX = _displayWidth / (double)image.Width;
         _displayScaleY = _displayHeight / (double)image.Height;
 
-        int frame = Dpi.S(6);
-        Padding = new Padding(frame);
-        ClientSize = new Size(_displayWidth + 2 + frame * 2, _displayHeight + 2 + frame * 2);
+        _toolbar = new EditorToolbarPanel(this) { Margin = Padding.Empty };
+        _toolbar.SetActiveTool(_tool);
+        _toolbar.SetColor(_color);
 
-        int left = area.Left + (area.Width - Width) / 2;
-        int top = area.Top + (area.Height - Height) / 2;
-        Location = new Point(left, top);
+        int clientWidth = Math.Max(_displayWidth + margin * 2, _toolbar.PreferredWidth);
+        int clientHeight = toolbarHeight + _displayHeight + margin * 2 + statusHeight;
+        ClientSize = new Size(clientWidth, clientHeight);
+        MinimumSize = SizeFromClientSize(new Size(
+            Math.Max(Dpi.S(600), _toolbar.PreferredWidth), Dpi.S(320)));
 
         _canvas = new EditorCanvas(this)
         {
             Dock = DockStyle.Fill,
-            BackColor = BorderColor,
-            Cursor = Cursors.Default
+            BackColor = WorkspaceColor,
+            Cursor = Cursors.Default,
+            Margin = Padding.Empty
         };
-        Controls.Add(_canvas);
+
+        _statusLabel.AutoSize = false;
+        _statusLabel.Dock = DockStyle.Fill;
+        _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _statusLabel.ForeColor = IconColor;
+        _statusLabel.BackColor = BarColor;
+        _statusLabel.Padding = new Padding(Dpi.S(10), 0, Dpi.S(10), 0);
+        _statusLabel.Font = new Font("Segoe UI", 9f);
+        _statusLabel.Margin = Padding.Empty;
+        UpdateStatus();
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            BackColor = WorkspaceColor,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, toolbarHeight));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, statusHeight));
+        root.Controls.Add(_toolbar, 0, 0);
+        root.Controls.Add(_canvas, 0, 1);
+        root.Controls.Add(_statusLabel, 0, 2);
+        Controls.Add(root);
 
         _toast.AutoSize = true;
         _toast.BackColor = Color.FromArgb(220, 30, 32, 36);
@@ -135,7 +211,7 @@ public sealed class ImageEditorForm : Form
         _toast.Padding = new Padding(Dpi.S(10), Dpi.S(6), Dpi.S(10), Dpi.S(6));
         _toast.Visible = false;
         _toast.Cursor = Cursors.Default;
-        Controls.Add(_toast);
+        _canvas.Controls.Add(_toast);
         _toast.BringToFront();
 
         _toastTimer = new System.Windows.Forms.Timer { Interval = 1800 };
@@ -151,128 +227,86 @@ public sealed class ImageEditorForm : Form
             _inlineCaretOn = !_inlineCaretOn;
             _inlineOverlay?.Invalidate();
         };
+
+        _canvas.Resize += (_, _) =>
+        {
+            if (!_viewInitialized)
+                return;
+            ClampViewOffset();
+            _canvas.Invalidate();
+        };
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        ApplySystemWindowTheme();
     }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-
-        _toolbar = new EditorToolbarForm(this) { Owner = this };
-        _toolbar.Show();
-        _toolbar.SetActiveTool(_tool);
-        _toolbar.SetColor(_color);
-        PositionToolbar();
+        CenterView();
+        _viewInitialized = true;
+        UpdateStatus();
+        _canvas.Invalidate();
     }
 
-    protected override void OnMouseEnter(EventArgs e)
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        base.OnMouseEnter(e);
-        UpdateEditorCursor();
-    }
-
-    protected override void OnMouseLeave(EventArgs e)
-    {
-        if (!_windowDragging)
-            Cursor = Cursors.Default;
-        base.OnMouseLeave(e);
-    }
-
-    protected override void OnMouseDown(MouseEventArgs e)
-    {
-        if (e.Button == MouseButtons.Left)
+        if (keyData == (Keys.Control | Keys.S))
         {
-            _windowDragging = true;
-            _windowDragStartCursor = Cursor.Position;
-            _windowDragStartLocation = Location;
-            Capture = true;
-            Cursor = Cursors.SizeAll;
-            return;
+            SaveFromToolbar();
+            return true;
         }
 
-        base.OnMouseDown(e);
-    }
-
-    protected override void OnMouseMove(MouseEventArgs e)
-    {
-        if (_windowDragging)
+        if (keyData == (Keys.Control | Keys.Z))
         {
-            var point = Cursor.Position;
-            int x = _windowDragStartLocation.X + point.X - _windowDragStartCursor.X;
-            int y = _windowDragStartLocation.Y + point.Y - _windowDragStartCursor.Y;
-            var area = SystemInformation.VirtualScreen;
-            x = Math.Clamp(x, area.Left - Width + Dpi.S(60), area.Right - Dpi.S(60));
-            y = Math.Clamp(y, area.Top, area.Bottom - Dpi.S(40));
-
-            int dx = x - Left;
-            int dy = y - Top;
-            Location = new Point(x, y);
-            if (dx != 0 || dy != 0)
-                _toolbar?.MoveBy(dx, dy);
-            return;
+            Undo();
+            return true;
         }
 
-        UpdateEditorCursor();
-        base.OnMouseMove(e);
-    }
-
-    protected override void OnMouseUp(MouseEventArgs e)
-    {
-        if (_windowDragging && e.Button == MouseButtons.Left)
+        if (keyData == (Keys.Control | Keys.C))
         {
-            _windowDragging = false;
-            Capture = false;
-            UpdateEditorCursor();
-            return;
+            CopyFromToolbar();
+            return true;
         }
 
-        base.OnMouseUp(e);
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
-    protected override void OnMouseCaptureChanged(EventArgs e)
+    private void ApplySystemWindowTheme()
     {
-        if (!Capture && _windowDragging)
+        int useDark = SystemUsesDarkTheme() ? 1 : 0;
+        try
         {
-            _windowDragging = false;
-            UpdateEditorCursor();
+            NativeMethods.DwmSetWindowAttribute(Handle,
+                NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
         }
-
-        base.OnMouseCaptureChanged(e);
-    }
-
-    private void UpdateEditorCursor()
-    {
-        if (_windowDragging)
+        catch
         {
-            Cursor = Cursors.SizeAll;
-            return;
         }
-
-        var point = PointToClient(Cursor.Position);
-        bool overFrame = ClientRectangle.Contains(point) && !_canvas.Bounds.Contains(point);
-        Cursor = overFrame ? Cursors.SizeAll : Cursors.Default;
     }
 
-    private void PositionToolbar()
+    private static bool SystemUsesDarkTheme()
     {
-        if (_toolbar == null)
-            return;
-
-        var area = Screen.FromControl(this).WorkingArea;
-        int x = Left + (Width - _toolbar.Width) / 2;
-        int y = Top + Height + Dpi.S(8);
-
-        if (y + _toolbar.Height > area.Bottom - Dpi.S(4))
-            y = area.Bottom - _toolbar.Height - Dpi.S(4);
-
-        x = Math.Clamp(x, area.Left + Dpi.S(4),
-            Math.Max(area.Left + Dpi.S(4), area.Right - _toolbar.Width - Dpi.S(4)));
-        _toolbar.Location = new Point(x, y);
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return key?.GetValue("AppsUseLightTheme") is int light && light == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void SelectTool(EditorTool tool)
     {
         CommitInlineTextIfAny();
         _tool = tool;
+        _canvas.Cursor = tool == EditorTool.Pan ? Cursors.Hand : Cursors.Default;
         _toolbar?.SetActiveTool(tool);
     }
 
@@ -320,12 +354,13 @@ public sealed class ImageEditorForm : Form
             LineThickness.ExtraThick => 2.4f,
             _ => 1f
         };
-        return Math.Clamp((int)Math.Round(medium * factor), 1, 32);
+        int width = Math.Clamp((int)Math.Round(medium * factor), 1, 32);
+        return Math.Clamp((int)Math.Round(width * (double)Dpi.Scale), 1, 96);
     }
 
     private float PreviewLineWidth()
     {
-        float scale = (float)Math.Min(_displayScaleX, _displayScaleY);
+        float scale = (float)Math.Min(ViewScaleX, ViewScaleY);
         return Math.Max(1.5f, LineWidth() * scale);
     }
 
@@ -366,53 +401,158 @@ public sealed class ImageEditorForm : Form
 
     private void CanvasMouseDown(EditorCanvas canvas, MouseEventArgs e)
     {
+        if (e.Button == MouseButtons.Middle)
+        {
+            BeginPan(canvas, e);
+            return;
+        }
+
+        if (e.Button != MouseButtons.Left) return;
+
         if (_inlineOverlay != null)
         {
             CommitInlineText();
             return;
         }
 
-        if (e.Button != MouseButtons.Left) return;
         if (!TryMapPoint(canvas.ClientSize, e.Location, out var point)) return;
 
         switch (_tool)
         {
+            case EditorTool.Pan:
+                BeginPan(canvas, e);
+                return;
+            case EditorTool.Move:
+            {
+                var shape = FindShape(point);
+                if (shape != null)
+                {
+                    _movingShape = shape;
+                    _moveOriginal = shape.Clone();
+                    _moveStartImage = point;
+                    _moveUndoPushed = false;
+                    canvas.Capture = true;
+                    canvas.Cursor = Cursors.SizeAll;
+                }
+                return;
+            }
             case EditorTool.Text:
-            {
                 BeginInlineText(point, e.Location);
-                break;
-            }
+                return;
             case EditorTool.Number:
-            {
+                BakeShapes();
                 PushUndo();
-                using var g = Graphics.FromImage(_image);
-                DrawNumber(g, _nextNumber++, point);
+                using (var g = Graphics.FromImage(_image))
+                    DrawNumber(g, _nextNumber++, point);
                 canvas.Invalidate();
-                break;
-            }
+                return;
+            case EditorTool.Freeform:
+                _dragging = true;
+                _freeformPoints.Clear();
+                _freeformPoints.Add(point);
+                _startImage = point;
+                _currentImage = point;
+                canvas.Capture = true;
+                canvas.Invalidate();
+                return;
             default:
                 _dragging = true;
                 _startImage = point;
                 _currentImage = point;
+                canvas.Capture = true;
                 canvas.Invalidate();
-                break;
+                return;
         }
     }
 
     private void CanvasMouseMove(EditorCanvas canvas, MouseEventArgs e)
     {
-        if (!_dragging) return;
+        if (_panning)
+        {
+            _viewOffsetX = _panStartOffsetX + e.X - _panStart.X;
+            _viewOffsetY = _panStartOffsetY + e.Y - _panStart.Y;
+            ClampViewOffset();
+            canvas.Invalidate();
+            return;
+        }
 
-        int x = (int)Math.Round((e.X - 1) / _displayScaleX);
-        int y = (int)Math.Round((e.Y - 1) / _displayScaleY);
+        if (_movingShape != null && _moveOriginal != null)
+        {
+            int moveX = (int)Math.Round((e.X - _viewOffsetX) / ViewScaleX);
+            int moveY = (int)Math.Round((e.Y - _viewOffsetY) / ViewScaleY);
+            var movePoint = ClampToImage(new Point(moveX, moveY));
+            int dx = movePoint.X - _moveStartImage.X;
+            int dy = movePoint.Y - _moveStartImage.Y;
+            if (dx == 0 && dy == 0)
+                return;
+
+            if (!_moveUndoPushed)
+            {
+                PushUndo();
+                _moveUndoPushed = true;
+            }
+
+            _movingShape.ApplyOffset(_moveOriginal, dx, dy);
+            RenderShapes();
+            canvas.Invalidate();
+            return;
+        }
+
+        if (!_dragging)
+        {
+            UpdateCanvasCursor(canvas, e.Location);
+            return;
+        }
+
+        int x = (int)Math.Round((e.X - _viewOffsetX) / ViewScaleX);
+        int y = (int)Math.Round((e.Y - _viewOffsetY) / ViewScaleY);
         _currentImage = ClampToImage(new Point(x, y));
+
+        if (_tool == EditorTool.Freeform)
+        {
+            var last = _freeformPoints.Count > 0 ? _freeformPoints[^1] : _currentImage;
+            int dx = _currentImage.X - last.X;
+            int dy = _currentImage.Y - last.Y;
+            if (dx * dx + dy * dy >= 1)
+                _freeformPoints.Add(_currentImage);
+        }
+
         canvas.Invalidate();
     }
 
     private void CanvasMouseUp(EditorCanvas canvas, MouseEventArgs e)
     {
+        if (_panning && (e.Button == MouseButtons.Left || e.Button == MouseButtons.Middle))
+        {
+            _panning = false;
+            canvas.Capture = false;
+            UpdateCanvasCursor(canvas, e.Location);
+            canvas.Invalidate();
+            return;
+        }
+
+        if (_movingShape != null && e.Button == MouseButtons.Left)
+        {
+            _movingShape = null;
+            _moveOriginal = null;
+            _moveUndoPushed = false;
+            canvas.Capture = false;
+            UpdateCanvasCursor(canvas, e.Location);
+            canvas.Invalidate();
+            return;
+        }
+
         if (!_dragging || e.Button != MouseButtons.Left) return;
         _dragging = false;
+
+        if (_tool == EditorTool.Freeform)
+        {
+            AddFreeformShape();
+            canvas.Capture = false;
+            UpdateCanvasCursor(canvas, e.Location);
+            canvas.Invalidate();
+            return;
+        }
 
         var rect = Rectangle.FromLTRB(
             Math.Min(_startImage.X, _currentImage.X),
@@ -421,50 +561,66 @@ public sealed class ImageEditorForm : Form
             Math.Max(_startImage.Y, _currentImage.Y));
         rect.Intersect(new Rectangle(0, 0, _image.Width, _image.Height));
 
-        if (rect.Width < 2 || rect.Height < 2)
+        if (_tool is EditorTool.Arrow or EditorTool.ArrowDashed)
         {
+            int dx = _currentImage.X - _startImage.X;
+            int dy = _currentImage.Y - _startImage.Y;
+            if (dx * dx + dy * dy < 4)
+            {
+                canvas.Capture = false;
+                canvas.Invalidate();
+                return;
+            }
+        }
+        else if (rect.Width < 2 || rect.Height < 2)
+        {
+            canvas.Capture = false;
             canvas.Invalidate();
             return;
         }
 
-        PushUndo();
-
-        switch (_tool)
+        if (IsShapeTool(_tool))
         {
-            case EditorTool.Rectangle:
-            {
-                using var g = Graphics.FromImage(_image);
-                using var pen = CreatePen(false);
-                g.DrawRectangle(pen, rect);
-                break;
-            }
-            case EditorTool.Square:
-            {
-                var square = SquareFromPoints(_startImage, _currentImage);
-                square.Intersect(new Rectangle(0, 0, _image.Width, _image.Height));
-                using var g = Graphics.FromImage(_image);
-                using var pen = CreatePen(false);
-                g.DrawRectangle(pen, square);
-                break;
-            }
-            case EditorTool.Arrow:
-            case EditorTool.ArrowDashed:
-            {
-                using var g = Graphics.FromImage(_image);
-                using var pen = CreatePen(_tool == EditorTool.ArrowDashed);
-                pen.CustomEndCap = new AdjustableArrowCap(4f, 5f, true);
-                g.DrawLine(pen, _startImage, _currentImage);
-                break;
-            }
-            case EditorTool.Mosaic:
-            {
-                var block = Math.Clamp(Math.Min(rect.Width, rect.Height) / 18, 6, 24);
-                Pixelate(rect, block);
-                break;
-            }
+            AddShape(_tool, _startImage, _currentImage, null);
+            canvas.Capture = false;
+            UpdateCanvasCursor(canvas, e.Location);
+            return;
         }
 
-        canvas.Invalidate();
+        if (_tool == EditorTool.Mosaic)
+        {
+            BakeShapes();
+            PushUndo();
+            var block = Math.Clamp(Math.Min(rect.Width, rect.Height) / 18, 6, 24);
+            Pixelate(rect, block);
+            canvas.Capture = false;
+            canvas.Invalidate();
+        }
+    }
+
+    private void CanvasMouseWheel(EditorCanvas canvas, MouseEventArgs e)
+    {
+        double factor = e.Delta > 0 ? 1.15 : 1 / 1.15;
+        ZoomBy(factor, e.Location, true);
+    }
+
+    private void UpdateCanvasCursor(EditorCanvas canvas, Point displayPoint)
+    {
+        if (_tool == EditorTool.Pan)
+        {
+            canvas.Cursor = Cursors.Hand;
+            return;
+        }
+
+        if (_tool == EditorTool.Move)
+        {
+            bool overShape = TryMapPoint(canvas.ClientSize, displayPoint, out var point) &&
+                             FindShape(point) != null;
+            canvas.Cursor = overShape ? Cursors.SizeAll : Cursors.Default;
+            return;
+        }
+
+        canvas.Cursor = Cursors.Default;
     }
 
     private void BeginInlineText(Point imagePoint, Point displayPoint)
@@ -489,7 +645,7 @@ public sealed class ImageEditorForm : Form
         var overlay = new InlineTextOverlay(this)
         {
             Bounds = new Rectangle(displayPoint, new Size(Dpi.S(8), Dpi.S(20))),
-            BackColor = BorderColor,
+            BackColor = WorkspaceColor,
             Enabled = false
         };
 
@@ -529,7 +685,7 @@ public sealed class ImageEditorForm : Form
         string text = _inlineInput.Text.Replace("\r\n", "\n").Replace('\r', '\n');
         string[] lines = text.Split('\n');
         using var g = _canvas.CreateGraphics();
-        using var font = new Font(_textFontFamily, _textFontSize * (float)_displayScaleY,
+        using var font = new Font(_textFontFamily, EffectiveTextFontSize * (float)ViewScaleY,
             _textFontStyle, GraphicsUnit.Pixel);
 
         float maxWidth = 0;
@@ -552,19 +708,23 @@ public sealed class ImageEditorForm : Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.Half;
 
-        using (var background = new SolidBrush(BorderColor))
+        using (var background = new SolidBrush(WorkspaceColor))
             g.FillRectangle(background, 0, 0, overlay.Width, overlay.Height);
 
         var overlayRect = new RectangleF(overlay.Left, overlay.Top, overlay.Width, overlay.Height);
-        var imageRect = new RectangleF(1, 1, _displayWidth, _displayHeight);
+        var imageRect = new RectangleF(
+            (float)_viewOffsetX,
+            (float)_viewOffsetY,
+            (float)(_image.Width * ViewScaleX),
+            (float)(_image.Height * ViewScaleY));
         var intersect = RectangleF.Intersect(overlayRect, imageRect);
         if (intersect.Width > 0 && intersect.Height > 0)
         {
             var source = new RectangleF(
-                (float)((intersect.Left - 1) / _displayScaleX),
-                (float)((intersect.Top - 1) / _displayScaleY),
-                (float)(intersect.Width / _displayScaleX),
-                (float)(intersect.Height / _displayScaleY));
+                (float)((intersect.Left - _viewOffsetX) / ViewScaleX),
+                (float)((intersect.Top - _viewOffsetY) / ViewScaleY),
+                (float)(intersect.Width / ViewScaleX),
+                (float)(intersect.Height / ViewScaleY));
             var destination = new RectangleF(
                 intersect.Left - overlay.Left,
                 intersect.Top - overlay.Top,
@@ -575,12 +735,12 @@ public sealed class ImageEditorForm : Form
 
         string text = (_inlineInput?.Text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
         string[] lines = text.Split('\n');
-        int imageFont = _textFontSize;
-        using var font = new Font(_textFontFamily, imageFont * (float)_displayScaleY,
+        int imageFont = EffectiveTextFontSize;
+        using var font = new Font(_textFontFamily, imageFont * (float)ViewScaleY,
             _textFontStyle, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(_color);
         using var shadow = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
-        int offset = Math.Max(1, (int)Math.Round(Math.Max(1, imageFont / 14.0) * _displayScaleY));
+        int offset = Math.Max(1, (int)Math.Round(Math.Max(1, imageFont / 14.0) * ViewScaleY));
 
         float lineHeight = font.GetHeight(g);
         float y = 0;
@@ -649,6 +809,7 @@ public sealed class ImageEditorForm : Form
 
         if (!string.IsNullOrWhiteSpace(text))
         {
+            BakeShapes();
             PushUndo();
             using var g = Graphics.FromImage(_image);
             DrawText(g, text, _inlineImagePoint);
@@ -692,12 +853,22 @@ public sealed class ImageEditorForm : Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
-        using (var background = new SolidBrush(BorderColor))
+        using (var background = new SolidBrush(WorkspaceColor))
             g.FillRectangle(background, 0, 0, size.Width, size.Height);
 
-        var destination = new Rectangle(1, 1, _displayWidth, _displayHeight);
-        g.DrawImage(_image, destination,
-            new Rectangle(0, 0, _image.Width, _image.Height), GraphicsUnit.Pixel);
+        float viewWidth = (float)(_image.Width * ViewScaleX);
+        float viewHeight = (float)(_image.Height * ViewScaleY);
+        var page = new RectangleF(
+            (float)_viewOffsetX, (float)_viewOffsetY, viewWidth, viewHeight);
+
+        int shadow = Dpi.S(4);
+        using (var shadowBrush = new SolidBrush(Color.FromArgb(70, 0, 0, 0)))
+            g.FillRectangle(shadowBrush, page.X + shadow, page.Y + shadow, page.Width, page.Height);
+
+        g.DrawImage(_image, page.X, page.Y, page.Width, page.Height);
+
+        using (var pagePen = new Pen(Color.FromArgb(172, 180, 192), 1f * Dpi.Scale))
+            g.DrawRectangle(pagePen, page.X, page.Y, page.Width, page.Height);
 
         if (_dragging)
             DrawPreview(g);
@@ -706,48 +877,39 @@ public sealed class ImageEditorForm : Form
     private void DrawPreview(Graphics g)
     {
         PointF ToDisplay(Point p) => new(
-            (float)(1 + p.X * _displayScaleX),
-            (float)(1 + p.Y * _displayScaleY));
+            (float)(_viewOffsetX + p.X * ViewScaleX),
+            (float)(_viewOffsetY + p.Y * ViewScaleY));
 
         PointF a = ToDisplay(_startImage);
         PointF b = ToDisplay(_currentImage);
 
-        using var pen = new Pen(_color, PreviewLineWidth()) { DashStyle = DashStyle.Dash };
-
-        switch (_tool)
+        if (_tool == EditorTool.Mosaic)
         {
-            case EditorTool.Rectangle:
-            case EditorTool.Mosaic:
-            {
-                var rect = RectangleF.FromLTRB(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y),
-                    Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
-                g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
-                break;
-            }
-            case EditorTool.Square:
-            {
-                float dx = b.X - a.X;
-                float dy = b.Y - a.Y;
-                float side = Math.Min(Math.Abs(dx), Math.Abs(dy));
-                float x = dx < 0 ? a.X - side : a.X;
-                float y = dy < 0 ? a.Y - side : a.Y;
-                g.DrawRectangle(pen, x, y, side, side);
-                break;
-            }
-            case EditorTool.Arrow:
-            case EditorTool.ArrowDashed:
-                pen.DashStyle = _tool == EditorTool.ArrowDashed ? DashStyle.Dash : DashStyle.Solid;
-                pen.CustomEndCap = new AdjustableArrowCap(4f, 5f, true);
-                g.DrawLine(pen, a, b);
-                break;
+            using var pen = new Pen(_color, PreviewLineWidth()) { DashStyle = DashStyle.Dash };
+            var rect = RectangleF.FromLTRB(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y),
+                Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
+            g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
+            return;
+        }
+
+        if (_tool == EditorTool.Freeform)
+        {
+            var points = _freeformPoints.Select(ToDisplay).ToList();
+            DrawShape(g, _tool, a, b, points, _color, PreviewLineWidth(), false, true);
+            return;
+        }
+
+        if (IsShapeTool(_tool))
+        {
+            DrawShape(g, _tool, a, b, null, _color, PreviewLineWidth(), _filledShapes, true);
         }
     }
 
     private bool TryMapPoint(Size size, Point canvasPoint, out Point imagePoint)
     {
         imagePoint = default;
-        int x = (int)Math.Round((canvasPoint.X - 1) / _displayScaleX);
-        int y = (int)Math.Round((canvasPoint.Y - 1) / _displayScaleY);
+        int x = (int)Math.Round((canvasPoint.X - _viewOffsetX) / ViewScaleX);
+        int y = (int)Math.Round((canvasPoint.Y - _viewOffsetY) / ViewScaleY);
         if (x < 0 || y < 0 || x >= _image.Width || y >= _image.Height)
             return false;
 
@@ -785,7 +947,7 @@ public sealed class ImageEditorForm : Form
 
     private void DrawText(Graphics g, string text, Point location)
     {
-        int fontSize = _textFontSize;
+        int fontSize = EffectiveTextFontSize;
         using var font = new Font(_textFontFamily, fontSize, _textFontStyle, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(_color);
         using var shadow = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
@@ -900,10 +1062,17 @@ public sealed class ImageEditorForm : Form
         if (_undo.Count == 0)
             return;
 
+        ClearShapeState();
         var previous = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
+        var oldSize = _image.Size;
         _image.Dispose();
         _image = previous;
+        if (_image.Width != oldSize.Width || _image.Height != oldSize.Height)
+        {
+            CenterView();
+            UpdateStatus();
+        }
         ShowToast(Localization.T("editor_status_undo"));
         _canvas.Invalidate();
     }
@@ -928,6 +1097,98 @@ public sealed class ImageEditorForm : Form
         CommitInlineTextIfAny();
         if (CopyToClipboard())
             ShowToast(Localization.T("editor_status_copied"));
+    }
+
+    private void ResizeImage()
+    {
+        CommitInlineTextIfAny();
+        using var dialog = new ImageResizeForm(_image.Width, _image.Height);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        ApplyResize(dialog.TargetWidth, dialog.TargetHeight);
+    }
+
+    private void ApplyResize(int width, int height)
+    {
+        if (width == _image.Width && height == _image.Height)
+            return;
+
+        Bitmap resized;
+        try
+        {
+            resized = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using var g = Graphics.FromImage(resized);
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.SmoothingMode = SmoothingMode.HighQuality;
+            g.DrawImage(_image, 0, 0, width, height);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, Localization.Format("editor_resize_failed", ex.Message), Text,
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        PushUndo();
+        ClearShapeState();
+        var old = _image;
+        _image = resized;
+        old.Dispose();
+        CenterView();
+        UpdateStatus();
+        _canvas.Invalidate();
+        ShowToast(Localization.T("editor_status_resized"));
+    }
+
+    private void RecognizeText()
+    {
+        CommitInlineTextIfAny();
+        _ = RecognizeTextAsync();
+    }
+
+    private async Task RecognizeTextAsync()
+    {
+        try
+        {
+            using var snapshot = new Bitmap(_image);
+            string text = await WindowsOcr.RecognizeAsync(snapshot);
+            if (IsDisposed || Disposing)
+                return;
+
+            using var dialog = new OcrResultForm(text);
+            dialog.ShowDialog(this);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, Localization.Format("editor_ocr_failed", ex.Message), Text,
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void OpenInPaint()
+    {
+        CommitInlineTextIfAny();
+        _openPaintAfterClose = true;
+        try
+        {
+            if (!SaveCurrentImage())
+            {
+                _openPaintAfterClose = false;
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _openPaintAfterClose = false;
+            MessageBox.Show(this, Localization.Format("editor_error_save", ex.Message), Text,
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        _skipSaveOnClose = true;
+        Close();
     }
 
     private bool SaveCurrentImage()
@@ -979,8 +1240,9 @@ public sealed class ImageEditorForm : Form
         _toast.Text = text;
         _toast.Visible = true;
         _toast.BringToFront();
-        _toast.Location = new Point((ClientSize.Width - _toast.Width) / 2,
-            ClientSize.Height - _toast.Height - Dpi.S(10));
+        var canvasSize = _canvas.ClientSize;
+        _toast.Location = new Point((canvasSize.Width - _toast.Width) / 2,
+            canvasSize.Height - _toast.Height - Dpi.S(12));
         _toastTimer.Stop();
         _toastTimer.Start();
     }
@@ -988,23 +1250,25 @@ public sealed class ImageEditorForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         CommitInlineTextIfAny();
-        try
+        if (!_skipSaveOnClose)
         {
-            if (!SaveCurrentImage())
+            try
             {
+                if (!SaveCurrentImage())
+                {
+                    e.Cancel = true;
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, Localization.Format("editor_error_save", ex.Message), Text,
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
                 e.Cancel = true;
                 return;
             }
         }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, Localization.Format("editor_error_save", ex.Message), Text,
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
-            e.Cancel = true;
-            return;
-        }
 
-        _closing = true;
         _toastTimer.Stop();
         base.OnFormClosing(e);
     }
@@ -1013,10 +1277,22 @@ public sealed class ImageEditorForm : Form
     {
         base.OnFormClosed(e);
 
-        if (_toolbar != null)
+        if (_openPaintAfterClose && !string.IsNullOrWhiteSpace(_path))
         {
-            try { _toolbar.Dispose(); } catch { }
-            _toolbar = null;
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "mspaint.exe",
+                    Arguments = "\"" + _path + "\"",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(Localization.Format("editor_paint_failed", ex.Message), Text,
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 
@@ -1032,14 +1308,64 @@ public sealed class ImageEditorForm : Form
             _inlineInput = null;
             try { _inlineOverlay?.Dispose(); } catch { }
             _inlineOverlay = null;
-            try { _toolbar?.Dispose(); } catch { }
-            _toolbar = null;
+            ClearShapeState();
             _image.Dispose();
             foreach (var bitmap in _undo)
                 bitmap.Dispose();
             _undo.Clear();
         }
         base.Dispose(disposing);
+    }
+
+    private static Icon CreateEditorWindowIcon()
+    {
+        using var bitmap = new Bitmap(64, 64, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Color.Transparent);
+
+            using var backgroundPath = RoundedRect(new Rectangle(2, 2, 60, 60), 13);
+            using (var background = new SolidBrush(BarColor))
+                g.FillPath(background, backgroundPath);
+            using (var edge = new Pen(Color.FromArgb(70, 255, 255, 255), 2f))
+                g.DrawPath(edge, backgroundPath);
+
+            using var line = new Pen(IconColor, 3.4f)
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+                LineJoin = LineJoin.Round
+            };
+
+            using (var frame = RoundedRect(new Rectangle(12, 12, 33, 30), 3))
+                g.DrawPath(line, frame);
+            g.DrawEllipse(line, 17, 17, 7, 7);
+            g.DrawLine(line, 15, 37, 25, 24);
+            g.DrawLine(line, 25, 24, 35, 37);
+            g.DrawLine(line, 29, 37, 36, 28);
+            g.DrawLine(line, 36, 28, 43, 37);
+
+            using var pencil = new Pen(IconActiveColor, 4.2f)
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round
+            };
+            g.DrawLine(pencil, 42, 53, 56, 39);
+            g.DrawLine(line, 56, 39, 59, 36);
+            g.DrawLine(line, 53, 36, 59, 42);
+        }
+
+        IntPtr handle = bitmap.GetHicon();
+        try
+        {
+            using var icon = Icon.FromHandle(handle);
+            return (Icon)icon.Clone();
+        }
+        finally
+        {
+            NativeMethods.DestroyIcon(handle);
+        }
     }
 
     private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -1092,6 +1418,40 @@ public sealed class ImageEditorForm : Form
                 g.DrawRectangle(pen, cx - side / 2, cy - side / 2, side, side);
                 break;
             }
+            case EditorIcon.Circle:
+            {
+                int side = Math.Min(inner.Width, inner.Height);
+                g.DrawEllipse(pen, cx - side / 2, cy - side / 2, side, side);
+                break;
+            }
+            case EditorIcon.Ellipse:
+                g.DrawEllipse(pen, inner.Left, inner.Top + Dpi.S(2), inner.Width, inner.Height - Dpi.S(4));
+                break;
+            case EditorIcon.Star:
+            {
+                using var path = StarPath(new RectangleF(inner.Left, inner.Top, inner.Width, inner.Height));
+                g.DrawPath(pen, path);
+                break;
+            }
+            case EditorIcon.Heart:
+            {
+                using var path = HeartPath(new RectangleF(inner.Left, inner.Top, inner.Width, inner.Height));
+                g.DrawPath(pen, path);
+                break;
+            }
+            case EditorIcon.Freeform:
+            {
+                var points = new[]
+                {
+                    new PointF(inner.Left, inner.Bottom - Dpi.S(2)),
+                    new PointF(inner.Left + Dpi.S(4), inner.Top + Dpi.S(3)),
+                    new PointF(cx, cy),
+                    new PointF(inner.Right - Dpi.S(4), inner.Bottom - Dpi.S(4)),
+                    new PointF(inner.Right, inner.Top + Dpi.S(2))
+                };
+                g.DrawCurve(pen, points);
+                break;
+            }
             case EditorIcon.Number:
                 g.DrawEllipse(pen, inner);
                 g.DrawLine(pen, cx - Dpi.S(2), cy - Dpi.S(3), cx, cy - Dpi.S(5));
@@ -1106,6 +1466,33 @@ public sealed class ImageEditorForm : Form
                 g.DrawLine(pen, inner.Left, inner.Bottom, inner.Right, inner.Top);
                 g.DrawLine(pen, inner.Right, inner.Top, inner.Right - Dpi.S(4), inner.Top + Dpi.S(1));
                 g.DrawLine(pen, inner.Right, inner.Top, inner.Right - Dpi.S(1), inner.Top + Dpi.S(4));
+                break;
+            }
+            case EditorIcon.Move:
+            {
+                g.DrawLine(pen, inner.Left, cy, inner.Right, cy);
+                g.DrawLine(pen, cx, inner.Top, cx, inner.Bottom);
+                int head = Dpi.S(3);
+                g.DrawLine(pen, inner.Left, cy, inner.Left + head, cy - head);
+                g.DrawLine(pen, inner.Left, cy, inner.Left + head, cy + head);
+                g.DrawLine(pen, inner.Right, cy, inner.Right - head, cy - head);
+                g.DrawLine(pen, inner.Right, cy, inner.Right - head, cy + head);
+                g.DrawLine(pen, cx, inner.Top, cx - head, inner.Top + head);
+                g.DrawLine(pen, cx, inner.Top, cx + head, inner.Top + head);
+                g.DrawLine(pen, cx, inner.Bottom, cx - head, inner.Bottom - head);
+                g.DrawLine(pen, cx, inner.Bottom, cx + head, inner.Bottom - head);
+                break;
+            }
+            case EditorIcon.Pan:
+            {
+                var palm = Rectangle.FromLTRB(cx - Dpi.S(4), cy - Dpi.S(1),
+                    cx + Dpi.S(4), cy + Dpi.S(7));
+                using var hand = RoundedRect(palm, Dpi.S(2));
+                g.DrawPath(pen, hand);
+                g.DrawLine(pen, cx - Dpi.S(3), cy - Dpi.S(1), cx - Dpi.S(3), cy - Dpi.S(6));
+                g.DrawLine(pen, cx, cy - Dpi.S(1), cx, cy - Dpi.S(8));
+                g.DrawLine(pen, cx + Dpi.S(3), cy - Dpi.S(1), cx + Dpi.S(3), cy - Dpi.S(6));
+                g.DrawLine(pen, cx - Dpi.S(4), cy + Dpi.S(2), cx - Dpi.S(7), cy - Dpi.S(2));
                 break;
             }
             case EditorIcon.Mosaic:
@@ -1167,6 +1554,63 @@ public sealed class ImageEditorForm : Form
                 g.DrawRectangle(pen, front);
                 break;
             }
+            case EditorIcon.Resize:
+            {
+                var frame = new Rectangle(inner.Left, inner.Top + Dpi.S(3),
+                    Math.Max(Dpi.S(8), inner.Width - Dpi.S(4)), Math.Max(Dpi.S(8), inner.Height - Dpi.S(7)));
+                g.DrawRectangle(pen, frame);
+                int startX = frame.Right - Dpi.S(5);
+                int startY = frame.Bottom - Dpi.S(3);
+                g.DrawLine(pen, startX, startY, inner.Right, inner.Top + Dpi.S(1));
+                g.DrawLine(pen, inner.Right, inner.Top + Dpi.S(1),
+                    inner.Right - Dpi.S(4), inner.Top + Dpi.S(1));
+                g.DrawLine(pen, inner.Right, inner.Top + Dpi.S(1),
+                    inner.Right, inner.Top + Dpi.S(5));
+                break;
+            }
+            case EditorIcon.Ocr:
+            {
+                int inset = Dpi.S(1);
+                int corner = Dpi.S(4);
+                g.DrawLine(pen, inner.Left, inner.Top + inset, inner.Left + corner, inner.Top + inset);
+                g.DrawLine(pen, inner.Left + inset, inner.Top, inner.Left + inset, inner.Top + corner);
+                g.DrawLine(pen, inner.Right - corner, inner.Top + inset, inner.Right, inner.Top + inset);
+                g.DrawLine(pen, inner.Right - inset, inner.Top, inner.Right - inset, inner.Top + corner);
+                g.DrawLine(pen, inner.Left, inner.Bottom - inset, inner.Left + corner, inner.Bottom - inset);
+                g.DrawLine(pen, inner.Left + inset, inner.Bottom - corner, inner.Left + inset, inner.Bottom);
+                g.DrawLine(pen, inner.Right - corner, inner.Bottom - inset, inner.Right, inner.Bottom - inset);
+                g.DrawLine(pen, inner.Right - inset, inner.Bottom - corner, inner.Right - inset, inner.Bottom);
+                g.DrawLine(pen, cx - Dpi.S(3), cy + Dpi.S(2), cx, cy - Dpi.S(2));
+                g.DrawLine(pen, cx, cy - Dpi.S(2), cx + Dpi.S(3), cy + Dpi.S(2));
+                g.DrawLine(pen, cx - Dpi.S(2), cy + Dpi.S(1), cx + Dpi.S(2), cy + Dpi.S(1));
+                break;
+            }
+            case EditorIcon.Paint:
+            {
+                var palette = new Rectangle(inner.Left, inner.Top + Dpi.S(2), inner.Width, inner.Height - Dpi.S(3));
+                g.DrawEllipse(pen, palette);
+                using var dot = new SolidBrush(color);
+                g.FillEllipse(dot, palette.Left + Dpi.S(3), palette.Top + Dpi.S(3), Dpi.S(2), Dpi.S(2));
+                g.FillEllipse(dot, palette.Left + Dpi.S(7), palette.Top + Dpi.S(2), Dpi.S(2), Dpi.S(2));
+                g.FillEllipse(dot, palette.Left + Dpi.S(10), palette.Top + Dpi.S(5), Dpi.S(2), Dpi.S(2));
+                g.DrawLine(pen, cx + Dpi.S(2), cy + Dpi.S(2), inner.Right, inner.Top);
+                g.DrawLine(pen, cx + Dpi.S(2), cy + Dpi.S(2), cx + Dpi.S(4), cy + Dpi.S(4));
+                break;
+            }
+            case EditorIcon.ZoomIn:
+            case EditorIcon.ZoomOut:
+            {
+                var lens = new Rectangle(inner.Left, inner.Top, Math.Max(Dpi.S(8), inner.Width - Dpi.S(5)),
+                    Math.Max(Dpi.S(8), inner.Height - Dpi.S(5)));
+                g.DrawEllipse(pen, lens);
+                g.DrawLine(pen, lens.Right - Dpi.S(2), lens.Bottom - Dpi.S(2), inner.Right, inner.Bottom);
+                int mx = lens.Left + lens.Width / 2;
+                int my = lens.Top + lens.Height / 2;
+                g.DrawLine(pen, mx - Dpi.S(3), my, mx + Dpi.S(3), my);
+                if (icon == EditorIcon.ZoomIn)
+                    g.DrawLine(pen, mx, my - Dpi.S(3), mx, my + Dpi.S(3));
+                break;
+            }
             case EditorIcon.Close:
             {
                 int inset = Dpi.S(2);
@@ -1175,6 +1619,377 @@ public sealed class ImageEditorForm : Form
                 break;
             }
         }
+    }
+
+    private sealed class ShapeAnnotation
+    {
+        public EditorTool Tool { get; init; }
+        public Point Start { get; set; }
+        public Point End { get; set; }
+        public List<Point>? Points { get; set; }
+        public Color Color { get; init; }
+        public int Width { get; init; }
+        public bool Filled { get; init; }
+
+        public ShapeAnnotation Clone() => new()
+        {
+            Tool = Tool,
+            Start = Start,
+            End = End,
+            Points = Points?.ToList(),
+            Color = Color,
+            Width = Width,
+            Filled = Filled
+        };
+
+        public void ApplyOffset(ShapeAnnotation original, int dx, int dy)
+        {
+            Start = new Point(original.Start.X + dx, original.Start.Y + dy);
+            End = new Point(original.End.X + dx, original.End.Y + dy);
+            if (original.Points != null)
+                Points = original.Points.Select(p => new Point(p.X + dx, p.Y + dy)).ToList();
+        }
+
+        public Rectangle GetBounds()
+        {
+            if (Points is { Count: > 0 })
+            {
+                int minX = Points[0].X;
+                int minY = Points[0].Y;
+                int maxX = minX;
+                int maxY = minY;
+                foreach (var p in Points)
+                {
+                    minX = Math.Min(minX, p.X);
+                    minY = Math.Min(minY, p.Y);
+                    maxX = Math.Max(maxX, p.X);
+                    maxY = Math.Max(maxY, p.Y);
+                }
+                return Rectangle.FromLTRB(minX, minY, maxX, maxY);
+            }
+
+            return Rectangle.FromLTRB(
+                Math.Min(Start.X, End.X),
+                Math.Min(Start.Y, End.Y),
+                Math.Max(Start.X, End.X),
+                Math.Max(Start.Y, End.Y));
+        }
+
+        public bool HitTest(Point point)
+        {
+            var bounds = GetBounds();
+            int padding = Math.Max(10, Width + 6);
+            bounds.Inflate(padding, padding);
+            return bounds.Contains(point);
+        }
+    }
+
+    private static RectangleF NormalizedRect(PointF a, PointF b) => RectangleF.FromLTRB(
+        Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
+
+    private static RectangleF SquareRect(PointF a, PointF b)
+    {
+        float dx = b.X - a.X;
+        float dy = b.Y - a.Y;
+        float side = Math.Min(Math.Abs(dx), Math.Abs(dy));
+        float x = dx < 0 ? a.X - side : a.X;
+        float y = dy < 0 ? a.Y - side : a.Y;
+        return new RectangleF(x, y, side, side);
+    }
+
+    private static GraphicsPath StarPath(RectangleF rect)
+    {
+        var path = new GraphicsPath();
+        float cx = rect.Left + rect.Width / 2f;
+        float cy = rect.Top + rect.Height / 2f;
+        float outer = Math.Min(rect.Width, rect.Height) / 2f;
+        float inner = outer * 0.45f;
+        PointF[] points = new PointF[10];
+        for (int i = 0; i < 10; i++)
+        {
+            double angle = -Math.PI / 2 + i * Math.PI / 5;
+            float radius = i % 2 == 0 ? outer : inner;
+            points[i] = new PointF(
+                cx + (float)Math.Cos(angle) * radius,
+                cy + (float)Math.Sin(angle) * radius);
+        }
+        path.AddPolygon(points);
+        return path;
+    }
+
+    private static GraphicsPath HeartPath(RectangleF rect)
+    {
+        float x = rect.Left;
+        float y = rect.Top;
+        float w = rect.Width;
+        float h = rect.Height;
+        var path = new GraphicsPath();
+        path.StartFigure();
+        path.AddBezier(
+            x + w * 0.5f, y + h * 0.24f,
+            x + w * 0.16f, y - h * 0.02f,
+            x - w * 0.02f, y + h * 0.34f,
+            x + w * 0.5f, y + h * 0.95f);
+        path.AddBezier(
+            x + w * 0.5f, y + h * 0.95f,
+            x + w * 1.02f, y + h * 0.34f,
+            x + w * 0.84f, y - h * 0.02f,
+            x + w * 0.5f, y + h * 0.24f);
+        path.CloseFigure();
+        return path;
+    }
+
+    private static bool IsShapeTool(EditorTool tool) => tool is
+        EditorTool.Rectangle or EditorTool.Square or EditorTool.Circle or EditorTool.Ellipse or
+        EditorTool.Star or EditorTool.Heart or EditorTool.Arrow or EditorTool.ArrowDashed or
+        EditorTool.Freeform;
+
+    private void DrawShape(Graphics g, EditorTool tool, PointF a, PointF b,
+        IReadOnlyList<PointF>? points, Color color, float width, bool filled, bool preview)
+    {
+        using var pen = new Pen(color, Math.Max(1f, width))
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+            LineJoin = LineJoin.Round
+        };
+        if (preview && tool is not EditorTool.Arrow and not EditorTool.ArrowDashed)
+            pen.DashStyle = DashStyle.Dash;
+        if (tool == EditorTool.ArrowDashed)
+            pen.DashStyle = DashStyle.Dash;
+
+        using var fillBrush = new SolidBrush(preview ? Color.FromArgb(90, color) : color);
+
+        switch (tool)
+        {
+            case EditorTool.Rectangle:
+            case EditorTool.Square:
+            case EditorTool.Circle:
+            case EditorTool.Ellipse:
+            case EditorTool.Star:
+            case EditorTool.Heart:
+            {
+                var rect = tool switch
+                {
+                    EditorTool.Square or EditorTool.Circle => SquareRect(a, b),
+                    _ => NormalizedRect(a, b)
+                };
+                if (rect.Width < 1 || rect.Height < 1)
+                    break;
+
+                if (filled)
+                {
+                    if (tool is EditorTool.Rectangle or EditorTool.Square)
+                        g.FillRectangle(fillBrush, rect);
+                    else if (tool is EditorTool.Circle or EditorTool.Ellipse)
+                        g.FillEllipse(fillBrush, rect);
+                    else
+                    {
+                        using var fillPath = tool == EditorTool.Star ? StarPath(rect) : HeartPath(rect);
+                        g.FillPath(fillBrush, fillPath);
+                    }
+                }
+
+                if (tool is EditorTool.Rectangle or EditorTool.Square)
+                    g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
+                else if (tool is EditorTool.Circle or EditorTool.Ellipse)
+                    g.DrawEllipse(pen, rect);
+                else
+                {
+                    using var path = tool == EditorTool.Star ? StarPath(rect) : HeartPath(rect);
+                    g.DrawPath(pen, path);
+                }
+                break;
+            }
+            case EditorTool.Arrow:
+            case EditorTool.ArrowDashed:
+            {
+                pen.CustomEndCap = new AdjustableArrowCap(4f, 5f, true);
+                g.DrawLine(pen, a, b);
+                break;
+            }
+            case EditorTool.Freeform:
+            {
+                if (points is { Count: > 1 })
+                {
+                    var path = new GraphicsPath();
+                    path.AddLines(points.ToArray());
+                    g.DrawPath(pen, path);
+                    path.Dispose();
+                }
+                break;
+            }
+        }
+    }
+
+    private void DrawShapeToImage(Graphics g, ShapeAnnotation shape)
+    {
+        var points = shape.Points?.Select(p => (PointF)p).ToList();
+        DrawShape(g, shape.Tool, shape.Start, shape.End, points,
+            shape.Color, shape.Width, shape.Filled, false);
+    }
+
+    private void EnsureShapeBase()
+    {
+        _shapeBase ??= new Bitmap(_image);
+    }
+
+    private void RenderShapes()
+    {
+        if (_shapeBase == null)
+            return;
+
+        var next = new Bitmap(_shapeBase);
+        using (var g = Graphics.FromImage(next))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            foreach (var shape in _shapes)
+                DrawShapeToImage(g, shape);
+        }
+
+        var old = _image;
+        _image = next;
+        old.Dispose();
+    }
+
+    private void ClearShapeState()
+    {
+        _shapes.Clear();
+        _shapeBase?.Dispose();
+        _shapeBase = null;
+        _movingShape = null;
+        _moveOriginal = null;
+    }
+
+    private void BakeShapes()
+    {
+        if (_shapes.Count == 0)
+            return;
+
+        ClearShapeState();
+    }
+
+    private ShapeAnnotation? FindShape(Point imagePoint)
+    {
+        for (int i = _shapes.Count - 1; i >= 0; i--)
+        {
+            if (_shapes[i].HitTest(imagePoint))
+                return _shapes[i];
+        }
+        return null;
+    }
+
+    private void AddShape(EditorTool tool, Point start, Point end, List<Point>? points)
+    {
+        PushUndo();
+        EnsureShapeBase();
+        _shapes.Add(new ShapeAnnotation
+        {
+            Tool = tool,
+            Start = start,
+            End = end,
+            Points = points,
+            Color = _color,
+            Width = LineWidth(),
+            Filled = _filledShapes
+        });
+        RenderShapes();
+        _canvas.Invalidate();
+    }
+
+    private void AddFreeformShape()
+    {
+        if (_freeformPoints.Count < 2)
+        {
+            _freeformPoints.Clear();
+            return;
+        }
+
+        var points = _freeformPoints.ToList();
+        var start = points[0];
+        var end = points[^1];
+        _freeformPoints.Clear();
+        AddShape(EditorTool.Freeform, start, end, points);
+    }
+
+    private void SetFilled(bool filled) => _filledShapes = filled;
+
+    private void ZoomIn() => ZoomBy(1.25, null, true);
+
+    private void ZoomOut() => ZoomBy(1 / 1.25);
+
+    private void ZoomBy(double factor, Point? focus = null, bool activatePan = false)
+    {
+        CommitInlineTextIfAny();
+        double oldZoom = _zoom;
+        double nextZoom = Math.Clamp(oldZoom * factor, 0.25, 4.0);
+        if (Math.Abs(nextZoom - oldZoom) < 0.0001)
+            return;
+
+        double viewportCx = focus?.X ?? _canvas.ClientSize.Width / 2.0;
+        double viewportCy = focus?.Y ?? _canvas.ClientSize.Height / 2.0;
+        double imageX = (viewportCx - _viewOffsetX) / (_displayScaleX * oldZoom);
+        double imageY = (viewportCy - _viewOffsetY) / (_displayScaleY * oldZoom);
+
+        _zoom = nextZoom;
+        _viewOffsetX = viewportCx - imageX * ViewScaleX;
+        _viewOffsetY = viewportCy - imageY * ViewScaleY;
+        ClampViewOffset();
+        UpdateStatus();
+        _canvas.Invalidate();
+
+        bool largerThanViewport = _image.Width * ViewScaleX > _canvas.ClientSize.Width + 1 ||
+                                  _image.Height * ViewScaleY > _canvas.ClientSize.Height + 1;
+        if (activatePan && nextZoom > oldZoom && largerThanViewport && _tool != EditorTool.Pan)
+            SelectTool(EditorTool.Pan);
+    }
+
+    private void ClampViewOffset()
+    {
+        int viewportW = _canvas.ClientSize.Width;
+        int viewportH = _canvas.ClientSize.Height;
+        if (viewportW <= 0 || viewportH <= 0)
+            return;
+
+        double viewW = _image.Width * ViewScaleX;
+        double viewH = _image.Height * ViewScaleY;
+
+        if (viewW <= viewportW)
+            _viewOffsetX = (viewportW - viewW) / 2;
+        else
+            _viewOffsetX = Math.Clamp(_viewOffsetX, viewportW - viewW, 0);
+
+        if (viewH <= viewportH)
+            _viewOffsetY = (viewportH - viewH) / 2;
+        else
+            _viewOffsetY = Math.Clamp(_viewOffsetY, viewportH - viewH, 0);
+    }
+
+    private void CenterView()
+    {
+        int viewportW = _canvas.ClientSize.Width;
+        int viewportH = _canvas.ClientSize.Height;
+        _viewOffsetX = (viewportW - _image.Width * ViewScaleX) / 2.0;
+        _viewOffsetY = (viewportH - _image.Height * ViewScaleY) / 2.0;
+    }
+
+    private void UpdateStatus()
+    {
+        if (_statusLabel.IsDisposed)
+            return;
+
+        _statusLabel.Text = $"{Math.Round(ViewScaleX * 100)}%    {_image.Width} × {_image.Height}";
+    }
+
+    private void BeginPan(EditorCanvas canvas, MouseEventArgs e)
+    {
+        CommitInlineTextIfAny();
+        _panning = true;
+        _panStart = e.Location;
+        _panStartOffsetX = _viewOffsetX;
+        _panStartOffsetY = _viewOffsetY;
+        canvas.Capture = true;
+        canvas.Cursor = Cursors.Hand;
     }
 
     private sealed class EditorCanvas : Control
@@ -1211,6 +2026,12 @@ public sealed class ImageEditorForm : Form
             base.OnMouseUp(e);
             _owner.CanvasMouseUp(this, e);
         }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            _owner.CanvasMouseWheel(this, e);
+        }
     }
 
     private sealed class InlineTextOverlay : Control
@@ -1231,7 +2052,7 @@ public sealed class ImageEditorForm : Form
         }
     }
 
-    private sealed class EditorToolbarForm : Form
+    private sealed class EditorToolbarPanel : Panel
     {
         private readonly ImageEditorForm _editor;
         private readonly Dictionary<EditorTool, IconToolButton> _toolButtons = new();
@@ -1242,6 +2063,7 @@ public sealed class ImageEditorForm : Form
         private readonly NumericUpDown _sizeBox = new();
         private readonly ComboBox _styleCombo = new();
         private readonly ComboBox _lineWidthCombo = new();
+        private readonly CheckBox _fillCheck = new();
         private static readonly string[] LineWidthKeys =
         {
             "editor_line_thin",
@@ -1264,29 +2086,31 @@ public sealed class ImageEditorForm : Form
             ShowAlways = true
         };
 
-        private bool _dragging;
-        private Point _dragStartCursor;
-        private Point _dragStartToolbar;
+        public int PreferredWidth { get; private set; }
 
-        public EditorToolbarForm(ImageEditorForm editor)
+        public EditorToolbarPanel(ImageEditorForm editor)
         {
             _editor = editor;
 
-            FormBorderStyle = FormBorderStyle.None;
-            StartPosition = FormStartPosition.Manual;
-            ShowInTaskbar = false;
             BackColor = BarColor;
             DoubleBuffered = true;
             Font = new Font("Segoe UI", 9f);
-            AutoScaleMode = AutoScaleMode.None;
+            Dock = DockStyle.Fill;
 
             AddTool(EditorTool.Text, EditorIcon.Text, "editor_tool_text");
             AddTool(EditorTool.Rectangle, EditorIcon.Rectangle, "editor_tool_rect");
             AddTool(EditorTool.Square, EditorIcon.Square, "editor_tool_square");
+            AddTool(EditorTool.Circle, EditorIcon.Circle, "editor_tool_circle");
+            AddTool(EditorTool.Ellipse, EditorIcon.Ellipse, "editor_tool_ellipse");
+            AddTool(EditorTool.Star, EditorIcon.Star, "editor_tool_star");
+            AddTool(EditorTool.Heart, EditorIcon.Heart, "editor_tool_heart");
             AddTool(EditorTool.Number, EditorIcon.Number, "editor_tool_number");
             AddTool(EditorTool.Arrow, EditorIcon.Arrow, "editor_tool_arrow");
             AddTool(EditorTool.ArrowDashed, EditorIcon.ArrowDashed, "editor_tool_arrow_dashed");
+            AddTool(EditorTool.Freeform, EditorIcon.Freeform, "editor_tool_freeform");
             AddTool(EditorTool.Mosaic, EditorIcon.Mosaic, "editor_tool_mosaic");
+            AddTool(EditorTool.Move, EditorIcon.Move, "editor_tool_move");
+            AddTool(EditorTool.Pan, EditorIcon.Pan, "editor_tool_pan");
 
             _fontCombo.DropDownStyle = ComboBoxStyle.DropDownList;
             _fontCombo.Font = new Font("Segoe UI", 9f);
@@ -1380,6 +2204,19 @@ public sealed class ImageEditorForm : Form
             _toolTip.SetToolTip(_lineWidthCombo, Localization.T("editor_line_width"));
             Controls.Add(_lineWidthCombo);
 
+            _fillCheck.Text = Localization.T("editor_fill");
+            _fillCheck.Font = new Font("Segoe UI", 9f);
+            _fillCheck.AutoSize = false;
+            _fillCheck.BackColor = BarColor;
+            _fillCheck.ForeColor = IconColor;
+            _fillCheck.FlatStyle = FlatStyle.Flat;
+            _fillCheck.FlatAppearance.BorderColor = HoverColor;
+            _fillCheck.TextAlign = ContentAlignment.MiddleLeft;
+            _fillCheck.Checked = _editor._filledShapes;
+            _fillCheck.CheckedChanged += (_, _) => _editor.SetFilled(_fillCheck.Checked);
+            _toolTip.SetToolTip(_fillCheck, Localization.T("editor_fill"));
+            Controls.Add(_fillCheck);
+
             _colorButton.Click += (_, _) => _editor.PickColor();
             _toolTip.SetToolTip(_colorButton, Localization.T("editor_color"));
             Controls.Add(_colorButton);
@@ -1388,36 +2225,14 @@ public sealed class ImageEditorForm : Form
             AddAction(EditorIcon.Undo, "editor_undo", _editor.Undo);
             AddAction(EditorIcon.Save, "editor_save", _editor.SaveFromToolbar);
             AddAction(EditorIcon.Copy, "editor_copy", _editor.CopyFromToolbar);
+            AddAction(EditorIcon.Resize, "editor_resize_image", _editor.ResizeImage);
+            AddAction(EditorIcon.Ocr, "editor_ocr", _editor.RecognizeText);
+            AddAction(EditorIcon.Paint, "editor_paint", _editor.OpenInPaint);
+            AddAction(EditorIcon.ZoomOut, "editor_zoom_out", _editor.ZoomOut);
+            AddAction(EditorIcon.ZoomIn, "editor_zoom_in", _editor.ZoomIn);
             AddAction(EditorIcon.Close, "editor_close", _editor.Close);
 
             LayoutButtons();
-
-            MouseDown += (_, e) =>
-            {
-                if (e.Button != MouseButtons.Left) return;
-                _dragging = true;
-                Capture = true;
-                _dragStartCursor = Cursor.Position;
-                _dragStartToolbar = Location;
-            };
-            MouseMove += (_, _) =>
-            {
-                if (!_dragging) return;
-                var point = Cursor.Position;
-                int dx = point.X - _dragStartCursor.X;
-                int dy = point.Y - _dragStartCursor.Y;
-                var area = Screen.FromControl(this).WorkingArea;
-                int x = Math.Clamp(_dragStartToolbar.X + dx, area.Left,
-                    Math.Max(area.Left, area.Right - Width));
-                int y = Math.Clamp(_dragStartToolbar.Y + dy, area.Top,
-                    Math.Max(area.Top, area.Bottom - Height));
-                Location = new Point(x, y);
-            };
-            MouseUp += (_, _) =>
-            {
-                _dragging = false;
-                Capture = false;
-            };
         }
 
         private void AddTool(EditorTool tool, EditorIcon icon, string tooltipKey)
@@ -1445,8 +2260,8 @@ public sealed class ImageEditorForm : Form
             int gap = Dpi.S(4);
             int size = Dpi.S(28);
             int controlHeight = Dpi.S(24);
-            int iconY = (Dpi.S(44) - size) / 2;
-            int controlY = (Dpi.S(44) - controlHeight) / 2;
+            int iconY = Dpi.S(8);
+            int controlY = Dpi.S(44);
             int x = padding;
 
             foreach (var button in _toolIconButtons)
@@ -1455,7 +2270,16 @@ public sealed class ImageEditorForm : Form
                 x += size + gap;
             }
 
-            x += Dpi.S(4);
+            x += Dpi.S(8);
+            foreach (var button in _actionIconButtons)
+            {
+                button.Bounds = new Rectangle(x, iconY, size, size);
+                x += size + gap;
+            }
+
+            int row1Width = x - gap + padding;
+
+            x = padding;
             _fontCombo.Bounds = new Rectangle(x, controlY, Dpi.S(130), controlHeight);
             x += Dpi.S(130) + Dpi.S(6);
             _sizeBox.Bounds = new Rectangle(x, controlY, Dpi.S(54), controlHeight);
@@ -1464,28 +2288,12 @@ public sealed class ImageEditorForm : Form
             x += Dpi.S(96) + Dpi.S(8);
             _lineWidthCombo.Bounds = new Rectangle(x, controlY, Dpi.S(84), controlHeight);
             x += Dpi.S(84) + Dpi.S(8);
+            _fillCheck.Bounds = new Rectangle(x, controlY + Dpi.S(1), Dpi.S(82), controlHeight - Dpi.S(2));
+            x += Dpi.S(82) + Dpi.S(8);
 
-            foreach (var button in _actionIconButtons)
-            {
-                button.Bounds = new Rectangle(x, iconY, size, size);
-                x += size + gap;
-            }
-
-            int width = x - gap + padding;
-            ClientSize = new Size(width, Dpi.S(44));
-        }
-
-        public void MoveBy(int dx, int dy)
-        {
-            if (dx == 0 && dy == 0)
-                return;
-
-            var area = SystemInformation.VirtualScreen;
-            int x = Math.Clamp(Location.X + dx, area.Left,
-                Math.Max(area.Left, area.Right - Width));
-            int y = Math.Clamp(Location.Y + dy, area.Top,
-                Math.Max(area.Top, area.Bottom - Height));
-            Location = new Point(x, y);
+            int row2Width = x - Dpi.S(8) + padding;
+            PreferredWidth = Math.Max(row1Width, row2Width);
+            Height = Dpi.S(76);
         }
 
         public void SetActiveTool(EditorTool tool)
@@ -1496,49 +2304,11 @@ public sealed class ImageEditorForm : Form
 
         public void SetColor(Color color) => _colorButton.SetSwatch(color);
 
-        protected override bool ShowWithoutActivation => true;
-
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                var cp = base.CreateParams;
-                cp.ExStyle |= NativeMethods.WS_EX_TOOLWINDOW;
-                return cp;
-            }
-        }
-
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using var path = RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), Dpi.S(12));
-            using var fill = new SolidBrush(BarColor);
-            g.FillPath(fill, path);
-            using var border = new Pen(Color.FromArgb(64, 255, 255, 255), 1f * Dpi.Scale);
-            g.DrawPath(border, path);
-        }
-
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            using var path = RoundedRect(new Rectangle(0, 0, Width, Height), Dpi.S(12));
-            var old = Region;
-            Region = new Region(path);
-            old?.Dispose();
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            if (e.CloseReason == CloseReason.UserClosing && !_editor.IsDisposed && !_editor._closing)
-            {
-                e.Cancel = true;
-                _editor.Close();
-                return;
-            }
-
-            base.OnFormClosing(e);
+            using var pen = new Pen(Color.FromArgb(54, 255, 255, 255), 1f * Dpi.Scale);
+            e.Graphics.DrawLine(pen, 0, Height - 1, Width, Height - 1);
         }
 
         protected override void Dispose(bool disposing)

@@ -138,6 +138,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         startWindow.Enabled = idle;
         startWindow.Click += (_, _) => StartRecording(CaptureMode.Window);
 
+        var screenshotSingle = new ToolStripMenuItem(Localization.T("screenshot_single"));
+        screenshotSingle.Enabled = idle;
+        screenshotSingle.Click += (_, _) => CaptureSingleRegionScreenshot();
+
         var screenshotRegion = new ToolStripMenuItem(Localization.T("screenshot_region"));
         screenshotRegion.Enabled = idle;
         screenshotRegion.Click += (_, _) => CaptureRegionScreenshot();
@@ -180,6 +184,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         SetShortcut(startFull, string.Equals(startMode, "fullscreen", StringComparison.OrdinalIgnoreCase) ? _settings.HotkeyStart : null);
         SetShortcut(startRegion, string.Equals(startMode, "region", StringComparison.OrdinalIgnoreCase) ? _settings.HotkeyStart : null);
         SetShortcut(startWindow, string.Equals(startMode, "window", StringComparison.OrdinalIgnoreCase) ? _settings.HotkeyStart : null);
+        SetShortcut(screenshotSingle, _settings.HotkeyScreenshotSingle);
         SetShortcut(screenshotRegion, _settings.HotkeyScreenshotRegion);
         SetShortcut(screenshotWindow, _settings.HotkeyScreenshotWindow);
         SetShortcut(screenshotScroll, _settings.HotkeyScreenshotScroll);
@@ -192,6 +197,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _menu.Items.Add(startRegion);
         _menu.Items.Add(startWindow);
         _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(screenshotSingle);
         _menu.Items.Add(screenshotRegion);
         _menu.Items.Add(screenshotWindow);
         _menu.Items.Add(screenshotScroll);
@@ -247,6 +253,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         Register("stop", _settings.HotkeyStop);
         Register("pause", _settings.HotkeyPause);
         Register("show-panel", _settings.HotkeyShowPanel);
+        Register("screenshot-single", _settings.HotkeyScreenshotSingle);
         Register("screenshot-region", _settings.HotkeyScreenshotRegion);
         Register("screenshot-window", _settings.HotkeyScreenshotWindow);
         Register("screenshot-scroll", _settings.HotkeyScreenshotScroll);
@@ -277,6 +284,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         else if (action == "show-panel")
         {
             ShowMainPanel();
+        }
+        else if (action == "screenshot-single")
+        {
+            CaptureSingleRegionScreenshot();
         }
         else if (action == "screenshot-region")
         {
@@ -818,7 +829,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         bool panelTopMost = SuspendPanelTopMost();
         try
         {
-            MessageBox.Show(Localization.T("about_text"), Localization.T("about_title"),
+            string text = Localization.T("about_text");
+            string link = Localization.T("about_official_link") +
+                          "https://github.com/linimbus/iRecordWindows";
+            text = text.Contains("© 2026 iRecord")
+                ? text.Replace("© 2026 iRecord", link + "\n\n© 2026 iRecord")
+                : text + "\n\n" + link;
+            MessageBox.Show(text, Localization.T("about_title"),
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         finally

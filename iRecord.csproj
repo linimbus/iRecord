@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -12,9 +12,9 @@
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>1.4.0</Version>
-    <FileVersion>1.4.0.0</FileVersion>
-    <AssemblyVersion>1.4.0.0</AssemblyVersion>
+    <Version>1.5.0</Version>
+    <FileVersion>1.5.0.0</FileVersion>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
     <Product>iRecord</Product>
     <AssemblyTitle>iRecord</AssemblyTitle>
     <Company>iRecord</Company>

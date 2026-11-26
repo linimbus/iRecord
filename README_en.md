@@ -1,4 +1,4 @@
-# iRecord 1.4.0
+# iRecord 1.5.0
 
 English | [简体中文](README.md)
 
@@ -18,14 +18,14 @@ A minimal native screen recorder for Windows. It runs in the system tray, lets y
 - Output formats: `MP4` (H.264), `MKV` (H.264), `MOV` (H.264), `WebM` (VP9 + Opus) or `GIF`
 - Mouse capture: hidden / show pointer / show pointer with highlighted left, right and middle clicks
 - Audio capture: no audio / system audio / microphone / system + microphone
-- Global hotkeys: start, stop, pause/resume (default `F9` / `F10` / `F11`); show-panel and region / window / scrolling screenshot hotkeys are configurable in Settings
+- Global hotkeys: start, stop, pause/resume (default `F9` / `F10` / `F11`); show-panel and single / multi-region / window / scrolling screenshot hotkeys are configurable in Settings
 - On-screen recording bar showing elapsed time with pause and stop buttons; the bar is excluded from the recording
 - Recording border: a red frame marks the actual capture area in tray mode, follows window movement, and is excluded from the recording
 - Volume feedback: the control bar shows live system and microphone levels; while recording the mic you can click or drag the volume cells to adjust gain (0–200%)
 - Pause/resume removes the paused period from both video and audio, keeping them in sync
 - Settings UI available in Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German, French and Spanish
 - Configurable frame rate, GIF frame rate, quality, system / microphone level gain, mouse capture mode, output folder, FFmpeg path, hotkeys and default start mode; microphone volume can be adjusted while recording
-- Version `1.4.0`
+- Version `1.5.0`
 
 ## Requirements
 
@@ -148,4 +148,4 @@ tools/iRecord.Cli/             Console launcher project (produces iRecord-cli.ex
 
 ## Version
 
-1.4.0
+1.5.0
