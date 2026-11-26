@@ -43,6 +43,9 @@ Remove-Item ".\$Output\iRecord.runtimeconfig.json" -ErrorAction SilentlyContinue
 
 Copy-Item .\README.md ".\$Output\README.md" -Force
 Copy-Item .\README_en.md ".\$Output\README_en.md" -Force
+if (Test-Path .\docs) {
+    Copy-Item .\docs ".\$Output\docs" -Recurse -Force
+}
 
 Write-Host ""
 Write-Host "Done. Output folder: $root\$Output" -ForegroundColor Green

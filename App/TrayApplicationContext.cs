@@ -1,5 +1,6 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
 using iRecord.Capture;
 using iRecord.UI;
 
@@ -8,10 +9,13 @@ namespace iRecord.App;
 public sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly Control _dispatcher = new();
-    private readonly Icon _icon;
+    private readonly Icon _idleIcon;
+    private readonly Icon _recordingIcon;
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _menu = new();
     private readonly HotkeyWindow _hotkeys = new();
+    private readonly System.Windows.Forms.Timer _recordingBlinkTimer;
+    private bool _recordingBlinkOn = true;
 
     private AppSettings _settings;
     private RecordingSession? _session;
@@ -32,14 +36,18 @@ public sealed class TrayApplicationContext : ApplicationContext
         Localization.SetLanguage(_settings.Language);
         Localization.Changed += OnLanguageChanged;
 
-        _icon = LoadIcon();
+        _idleIcon = CreateRingIcon(Color.White, null);
+        _recordingIcon = CreateRingIcon(Color.White, Color.FromArgb(232, 54, 51));
         _tray = new NotifyIcon
         {
-            Icon = _icon,
+            Icon = _idleIcon,
             Visible = true,
             ContextMenuStrip = _menu
         };
         _tray.DoubleClick += (_, _) => ShowMainPanel();
+
+        _recordingBlinkTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _recordingBlinkTimer.Tick += (_, _) => ToggleRecordingBlink();
 
         _hotkeys.Pressed += OnHotkeyPressed;
 
@@ -85,15 +93,38 @@ public sealed class TrayApplicationContext : ApplicationContext
         _panel.BringToFront();
     }
 
-    private static Icon LoadIcon()
+    private static Icon CreateRingIcon(Color ringColor, Color? centerColor)
     {
+        using var bitmap = new Bitmap(64, 64, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(Color.Transparent);
+
+            if (centerColor.HasValue)
+            {
+                using var center = new SolidBrush(centerColor.Value);
+                g.FillEllipse(center, 17, 17, 30, 30);
+            }
+
+            using var pen = new Pen(ringColor, 8f)
+            {
+                StartCap = System.Drawing.Drawing2D.LineCap.Round,
+                EndCap = System.Drawing.Drawing2D.LineCap.Round
+            };
+            g.DrawEllipse(pen, 9, 9, 46, 46);
+        }
+
+        IntPtr handle = bitmap.GetHicon();
         try
         {
-            var extracted = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (extracted != null) return (Icon)extracted.Clone();
+            using var icon = Icon.FromHandle(handle);
+            return (Icon)icon.Clone();
         }
-        catch { }
-        return (Icon)SystemIcons.Application.Clone();
+        finally
+        {
+            NativeMethods.DestroyIcon(handle);
+        }
     }
 
     private void Post(Action action)
@@ -162,6 +193,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         stop.Enabled = recording;
         stop.Click += (_, _) => StopRecording();
 
+        var showRecordingBar = new ToolStripMenuItem(Localization.T("tray_show_recording_bar"));
+        showRecordingBar.Enabled = recording;
+        showRecordingBar.Click += (_, _) => ShowRecordingBar();
+
         var settings = new ToolStripMenuItem(Localization.T("tray_settings"));
         settings.Enabled = idle;
         settings.Click += (_, _) => OpenSettings();
@@ -203,6 +238,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(pause);
         _menu.Items.Add(stop);
+        _menu.Items.Add(showRecordingBar);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(settings);
         _menu.Items.Add(openFolder);
@@ -369,6 +405,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         _session = session;
+        _recordingBlinkOn = true;
+        _tray.Icon = _recordingIcon;
+        _recordingBlinkTimer.Start();
 
         _bar = new ControlBarForm(
             () => _session?.Elapsed ?? TimeSpan.Zero,
@@ -378,7 +417,8 @@ public sealed class TrayApplicationContext : ApplicationContext
                 ? (0f, 0f)
                 : (_session.SystemAudioLevel, _session.MicAudioLevel),
             _settings.SystemLevelGain,
-            _settings.MicLevelGain);
+            _settings.MicLevelGain,
+            _settings.RecordingBarOpacity);
         _bar.PauseClicked += TogglePause;
         _bar.StopClicked += StopRecording;
         _bar.Show();
@@ -398,6 +438,16 @@ public sealed class TrayApplicationContext : ApplicationContext
         RebuildMenu();
     }
 
+    private void ShowRecordingBar()
+    {
+        if (_session == null || _session.IsEncoding || _bar == null)
+            return;
+
+        if (!_bar.Visible)
+            _bar.Show();
+        _bar.BringToFront();
+    }
+
     private void CloseBorder()
     {
         _border?.Close();
@@ -411,6 +461,8 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         var session = _session;
         session.Stop();
+        _recordingBlinkTimer.Stop();
+        _tray.Icon = _idleIcon;
 
         _bar?.Close();
         _bar?.Dispose();
@@ -428,8 +480,31 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             if (_session == null) return;
             _bar?.SetPaused(_session.IsPaused);
+
+            if (_session.IsPaused)
+            {
+                _recordingBlinkTimer.Stop();
+                _recordingBlinkOn = true;
+                _tray.Icon = _recordingIcon;
+            }
+            else if (!_session.IsEncoding)
+            {
+                _recordingBlinkOn = true;
+                _tray.Icon = _recordingIcon;
+                _recordingBlinkTimer.Start();
+            }
+
             RebuildMenu();
         });
+    }
+
+    private void ToggleRecordingBlink()
+    {
+        if (_session == null || _session.IsPaused || _session.IsEncoding)
+            return;
+
+        _recordingBlinkOn = !_recordingBlinkOn;
+        _tray.Icon = _recordingBlinkOn ? _recordingIcon : _idleIcon;
     }
 
     private void OnSessionFinished(string path)
@@ -437,6 +512,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         Post(() =>
         {
             _session = null;
+            _recordingBlinkTimer.Stop();
+            _tray.Icon = _idleIcon;
             _bar?.Close();
             _bar?.Dispose();
             _bar = null;
@@ -453,6 +530,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         Post(() =>
         {
             _session = null;
+            _recordingBlinkTimer.Stop();
+            _tray.Icon = _idleIcon;
             _bar?.Close();
             _bar?.Dispose();
             _bar = null;
@@ -846,6 +925,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         try { _panel?.Dispose(); } catch { }
         _panel = null;
         try { _hotkeys.Dispose(); } catch { }
+        try { _recordingBlinkTimer.Stop(); _recordingBlinkTimer.Dispose(); } catch { }
         try { _tray.Visible = false; _tray.Dispose(); } catch { }
         Localization.Changed -= OnLanguageChanged;
         ExitThread();
@@ -858,8 +938,10 @@ public sealed class TrayApplicationContext : ApplicationContext
             Application.Idle -= ShowPanelOnStartup;
             try { _panel?.Dispose(); } catch { }
             try { _hotkeys.Dispose(); } catch { }
+            try { _recordingBlinkTimer.Stop(); _recordingBlinkTimer.Dispose(); } catch { }
             try { _tray.Dispose(); } catch { }
-            try { _icon.Dispose(); } catch { }
+            try { _idleIcon.Dispose(); } catch { }
+            try { _recordingIcon.Dispose(); } catch { }
             try { _menu.Dispose(); } catch { }
             try { _dispatcher.Dispose(); } catch { }
         }

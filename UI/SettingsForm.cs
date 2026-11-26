@@ -33,6 +33,7 @@ public sealed class SettingsForm : Form
     private readonly Label _hotkeyScreenshotScrollLabel = new();
     private readonly Label _modeLabel = new();
     private readonly Label _opacityLabel = new();
+    private readonly Label _recordingOpacityLabel = new();
     private readonly Label _hint = new();
 
     private readonly ComboBox _languageCombo = new();
@@ -47,6 +48,7 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _micGain = new();
     private readonly NumericUpDown _micVolume = new();
     private readonly NumericUpDown _opacity = new();
+    private readonly NumericUpDown _recordingOpacity = new();
     private readonly TextBox _outputText = new();
     private readonly TextBox _ffmpegText = new();
     private readonly HotkeyBox _hotStart = new();
@@ -136,6 +138,7 @@ public sealed class SettingsForm : Form
         Row(_languageLabel, _languageCombo, leftLabelX, leftFieldX, 300, ref y);
         Row(_modeLabel, _modeCombo, leftLabelX, leftFieldX, 300, ref y);
         Row(_opacityLabel, _opacity, leftLabelX, leftFieldX, 300, ref y);
+        Row(_recordingOpacityLabel, _recordingOpacity, leftLabelX, leftFieldX, 300, ref y);
         y += 12;
 
         int leftY = y;
@@ -219,19 +222,21 @@ public sealed class SettingsForm : Form
         _micVolume.Maximum = 200;
         _opacity.Minimum = 20;
         _opacity.Maximum = 100;
+        _recordingOpacity.Minimum = 20;
+        _recordingOpacity.Maximum = 100;
 
         Controls.AddRange(new Control[]
         {
             _generalHeader, generalSep, _recordingHeader, recordingSep,
             _hotkeysHeader, hotkeysSep, _outputHeader, outputSep, footerSep,
-            _languageLabel, _modeLabel, _opacityLabel,
+            _languageLabel, _modeLabel, _opacityLabel, _recordingOpacityLabel,
             _formatLabel, _qualityLabel, _fpsLabel, _gifFpsLabel, _audioLabel,
             _systemGainLabel, _micGainLabel, _micVolumeLabel, _mouseLabel,
             _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel, _hotkeyShowPanelLabel,
             _hotkeyScreenshotSingleLabel, _hotkeyScreenshotRegionLabel, _hotkeyScreenshotWindowLabel,
             _hotkeyScreenshotScrollLabel, _hint,
             _outputLabel, _ffmpegLabel,
-            _languageCombo, _modeCombo, _opacity, _formatCombo, _qualityCombo, _fps, _gifFps,
+            _languageCombo, _modeCombo, _opacity, _recordingOpacity, _formatCombo, _qualityCombo, _fps, _gifFps,
             _audioCombo, _systemGain, _micGain, _micVolume, _mouseCombo,
             _hotStart, _hotStop, _hotPause, _hotShowPanel,
             _hotScreenshotSingle, _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll,
@@ -241,7 +246,7 @@ public sealed class SettingsForm : Form
         int tab = 0;
         foreach (var control in new Control[]
                  {
-                     _languageCombo, _modeCombo, _opacity,
+                     _languageCombo, _modeCombo, _opacity, _recordingOpacity,
                      _formatCombo, _qualityCombo, _fps, _gifFps, _audioCombo,
                      _systemGain, _micGain, _micVolume, _mouseCombo,
                      _hotStart, _hotStop, _hotPause, _hotShowPanel,
@@ -295,6 +300,7 @@ public sealed class SettingsForm : Form
         _hotkeyScreenshotScrollLabel.Text = Localization.T("settings_hotkey_screenshot_scroll");
         _modeLabel.Text = Localization.T("settings_start_mode");
         _opacityLabel.Text = Localization.T("settings_panel_opacity");
+        _recordingOpacityLabel.Text = Localization.T("settings_recording_opacity");
         _hint.Text = Localization.T("settings_hint_hotkey");
         _save.Text = Localization.T("settings_save");
         _cancel.Text = Localization.T("settings_cancel");
@@ -345,6 +351,7 @@ public sealed class SettingsForm : Form
         _micGain.Value = Math.Clamp(_result.MicLevelGain, 1, 10);
         _micVolume.Value = Math.Clamp(_result.MicVolume, 0, 200);
         _opacity.Value = Math.Clamp(_result.PanelOpacity, 20, 100);
+        _recordingOpacity.Value = Math.Clamp(_result.RecordingBarOpacity, 20, 100);
         UpdateFormatDependentState();
         _outputText.Text = _result.OutputFolder;
         _ffmpegText.Text = _result.FfmpegPath;
@@ -438,6 +445,7 @@ public sealed class SettingsForm : Form
         _result.MicLevelGain = (int)_micGain.Value;
         _result.MicVolume = (int)_micVolume.Value;
         _result.PanelOpacity = (int)_opacity.Value;
+        _result.RecordingBarOpacity = (int)_recordingOpacity.Value;
         _result.OutputFolder = _outputText.Text.Trim();
         _result.FfmpegPath = _ffmpegText.Text.Trim();
 

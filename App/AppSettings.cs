@@ -13,6 +13,7 @@ public sealed class AppSettings
     public int SystemLevelGain { get; set; } = 3;
     public int MicLevelGain { get; set; } = 4;
     public int PanelOpacity { get; set; } = 90;
+    public int RecordingBarOpacity { get; set; } = 80;
     public string OutputFolder { get; set; } = string.Empty;
     public string FfmpegPath { get; set; } = string.Empty;
     public string StartMode { get; set; } = "fullscreen";

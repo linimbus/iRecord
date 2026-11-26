@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using iRecord.App;
@@ -7,11 +8,19 @@ namespace iRecord.UI;
 public sealed class ControlBarForm : Form
 {
     private const int MeterSegments = 5;
+    private const int BlinkCycleMs = 2000;
+    private const int BlinkOffMs = 1000;
+
+    private enum BarIcon
+    {
+        None,
+        Pause,
+        Play,
+        Stop,
+        Close
+    }
 
     private static readonly Color BackgroundColor = Color.FromArgb(26, 28, 32);
-    private static readonly Color MeterLowColor = Color.FromArgb(96, 204, 128);
-    private static readonly Color MeterMidColor = Color.FromArgb(240, 190, 70);
-    private static readonly Color MeterHighColor = Color.FromArgb(232, 84, 80);
     private static readonly Color MeterEmptyColor = Color.FromArgb(48, 52, 60);
     private static readonly Color MicMeterColor = Color.FromArgb(86, 186, 255);
     private static readonly Color MicMeterHighColor = Color.FromArgb(150, 225, 255);
@@ -22,14 +31,22 @@ public sealed class ControlBarForm : Form
     private readonly bool _showMicLevel;
     private readonly float _systemLevelGain;
     private readonly float _micLevelGain;
+    private readonly double _idleOpacity;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly Label _dot;
     private readonly LedTimeDisplay _time;
     private readonly BarButton _pause;
     private readonly BarButton _stop;
+    private readonly BarButton _hide;
+    private readonly ToolTip _toolTip = new()
+    {
+        InitialDelay = 300,
+        ReshowDelay = 100
+    };
 
     private Rectangle _meterBounds;
     private bool _paused;
+    private long _blinkStart;
     private Point _dragStartScreen;
     private Point _dragStartForm;
     private bool _dragging;
@@ -45,7 +62,8 @@ public sealed class ControlBarForm : Form
         bool showMicLevel,
         Func<(float System, float Mic)> levelProvider,
         int systemLevelGain,
-        int micLevelGain)
+        int micLevelGain,
+        int idleOpacityPercent)
     {
         _elapsedProvider = elapsedProvider;
         _showSystemLevel = showSystemLevel;
@@ -53,8 +71,8 @@ public sealed class ControlBarForm : Form
         _levelProvider = levelProvider;
         _systemLevelGain = Math.Clamp(systemLevelGain, 1, 10);
         _micLevelGain = Math.Clamp(micLevelGain, 1, 10);
+        _idleOpacity = Math.Clamp(idleOpacityPercent, 20, 100) / 100.0;
 
-        bool hasMic = _showMicLevel;
         bool hasMeter = _showSystemLevel || _showMicLevel;
         bool bothMeters = _showSystemLevel && _showMicLevel;
 
@@ -69,19 +87,20 @@ public sealed class ControlBarForm : Form
 
         const int dotW = 18;
         const int timeW = 104;
-        const int buttonW = 60;
+        const int buttonW = 32;
+        const int closeW = 32;
         const int gap = 8;
         const int timeGap = 4;
         const int groupGap = 6;
         const int buttonGap = 8;
-        const int padding = 14;
+        const int padding = 8;
         int meterW = hasMeter ? (bothMeters ? 40 : 16) : 0;
 
         int contentW = dotW + timeGap + timeW;
         if (hasMeter) contentW += groupGap + meterW;
-        contentW += buttonGap + buttonW + gap + buttonW;
+        contentW += buttonGap + buttonW + gap + buttonW + gap + closeW;
 
-        Size = new Size(Dpi.S(contentW + padding * 2), Dpi.S(hasMic ? 58 : 32));
+        Size = new Size(Dpi.S(contentW + padding * 2), Dpi.S(buttonW + padding * 2));
 
         _dot = new Label
         {
@@ -102,28 +121,39 @@ public sealed class ControlBarForm : Form
 
         _pause = new BarButton
         {
-            Text = Localization.T("bar_pause"),
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Icon = BarIcon.Pause,
             NormalBackColor = Color.FromArgb(58, 62, 70),
             HoverBackColor = Color.FromArgb(74, 80, 90),
             PressedBackColor = Color.FromArgb(46, 50, 58)
         };
         _pause.Click += (_, _) => PauseClicked?.Invoke();
+        _toolTip.SetToolTip(_pause, Localization.T("bar_pause"));
 
         _stop = new BarButton
         {
-            Text = Localization.T("bar_stop"),
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Icon = BarIcon.Stop,
             NormalBackColor = Color.FromArgb(198, 58, 56),
             HoverBackColor = Color.FromArgb(218, 74, 72),
             PressedBackColor = Color.FromArgb(168, 44, 42)
         };
         _stop.Click += (_, _) => StopClicked?.Invoke();
+        _toolTip.SetToolTip(_stop, Localization.T("bar_stop"));
+
+        _hide = new BarButton
+        {
+            Icon = BarIcon.Close,
+            NormalBackColor = Color.FromArgb(52, 56, 64),
+            HoverBackColor = Color.FromArgb(70, 76, 86),
+            PressedBackColor = Color.FromArgb(42, 46, 54)
+        };
+        _hide.Click += (_, _) => Hide();
+        _toolTip.SetToolTip(_hide, Localization.T("bar_hide"));
 
         Controls.Add(_dot);
         Controls.Add(_time);
         Controls.Add(_pause);
         Controls.Add(_stop);
+        Controls.Add(_hide);
 
         LayoutContent();
 
@@ -142,7 +172,8 @@ public sealed class ControlBarForm : Form
     {
         int dotW = Dpi.S(18);
         int timeW = Dpi.S(104);
-        int buttonW = Dpi.S(60);
+        int buttonW = Dpi.S(32);
+        int closeW = Dpi.S(32);
         int buttonH = Dpi.S(32);
         int gap = Dpi.S(8);
         int timeGap = Dpi.S(4);
@@ -154,7 +185,7 @@ public sealed class ControlBarForm : Form
 
         int contentW = dotW + timeGap + timeW;
         if (hasMeter) contentW += groupGap + meterW;
-        contentW += buttonGap + buttonW + gap + buttonW;
+        contentW += buttonGap + buttonW + gap + buttonW + gap + closeW;
 
         int x = (ClientSize.Width - contentW) / 2;
         int topY = (ClientSize.Height - buttonH) / 2;
@@ -181,6 +212,8 @@ public sealed class ControlBarForm : Form
         _pause.Bounds = new Rectangle(x, topY, buttonW, buttonH);
         x += buttonW + gap;
         _stop.Bounds = new Rectangle(x, topY, buttonW, buttonH);
+        x += buttonW + gap;
+        _hide.Bounds = new Rectangle(x, topY, closeW, buttonH);
     }
 
     protected override CreateParams CreateParams
@@ -199,6 +232,10 @@ public sealed class ControlBarForm : Form
         var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
         Location = new Point(wa.Left + (wa.Width - Width) / 2, wa.Bottom - Height - 48);
         ApplyRoundCorners();
+        Opacity = _idleOpacity;
+        _blinkStart = Environment.TickCount64;
+        UpdateBlink();
+        UpdateOpacity();
         UpdateTime();
         _timer.Start();
 
@@ -227,18 +264,18 @@ public sealed class ControlBarForm : Form
         if (_showSystemLevel)
         {
             DrawVerticalMeter(g, new Rectangle(x, _meterBounds.Y, columnW, _meterBounds.Height),
-                _displaySystem, false);
+                _displaySystem);
             x += columnW + columnGap;
         }
 
         if (_showMicLevel)
         {
             DrawVerticalMeter(g, new Rectangle(x, _meterBounds.Y, columnW, _meterBounds.Height),
-                _displayMic, true);
+                _displayMic);
         }
     }
 
-    private static void DrawVerticalMeter(Graphics g, Rectangle area, float level, bool mic)
+    private static void DrawVerticalMeter(Graphics g, Rectangle area, float level)
     {
         int segH = Dpi.S(4);
         int gap = Dpi.S(2);
@@ -254,39 +291,38 @@ public sealed class ControlBarForm : Form
             int y = bottom - (i + 1) * segH - i * gap;
             var rect = new Rectangle(x, y, barW, segH);
             using var path = RoundedRect(rect, Dpi.S(1));
-            using var fill = new SolidBrush(i < lit ? SegmentColor(i, mic) : MeterEmptyColor);
+            using var fill = new SolidBrush(i < lit ? SegmentColor(i) : MeterEmptyColor);
             g.FillPath(fill, path);
             g.DrawPath(border, path);
         }
     }
 
-    private static Color SegmentColor(int index, bool mic)
-    {
-        if (mic) return index >= 4 ? MicMeterHighColor : MicMeterColor;
-        return index switch
-        {
-            <= 2 => MeterLowColor,
-            3 => MeterMidColor,
-            _ => MeterHighColor
-        };
-    }
+    private static Color SegmentColor(int index) =>
+        index >= 4 ? MicMeterHighColor : MicMeterColor;
 
     public void SetPaused(bool paused)
     {
         _paused = paused;
-        _pause.Text = Localization.T(paused ? "bar_resume" : "bar_pause");
+        _pause.Icon = paused ? BarIcon.Play : BarIcon.Pause;
+        _toolTip.SetToolTip(_pause, Localization.T(paused ? "bar_resume" : "bar_pause"));
         _dot.ForeColor = paused ? Color.FromArgb(240, 190, 60) : Color.FromArgb(232, 54, 51);
+        _dot.Visible = true;
+        if (!paused)
+            _blinkStart = Environment.TickCount64;
     }
 
     public void RefreshLanguage()
     {
-        _pause.Text = Localization.T(_paused ? "bar_resume" : "bar_pause");
-        _stop.Text = Localization.T("bar_stop");
+        _toolTip.SetToolTip(_pause, Localization.T(_paused ? "bar_resume" : "bar_pause"));
+        _toolTip.SetToolTip(_stop, Localization.T("bar_stop"));
+        _toolTip.SetToolTip(_hide, Localization.T("bar_hide"));
         UpdateTime();
     }
 
     private void RefreshDynamic()
     {
+        UpdateOpacity();
+        UpdateBlink();
         UpdateTime();
 
         if (_showSystemLevel || _showMicLevel)
@@ -299,6 +335,31 @@ public sealed class ControlBarForm : Form
     }
 
     private static float AmplifyLevel(float value, float gain) => Math.Clamp(value * gain, 0f, 1f);
+
+    private void UpdateBlink()
+    {
+        if (_paused)
+        {
+            if (!_dot.Visible)
+                _dot.Visible = true;
+            return;
+        }
+
+        long phase = (Environment.TickCount64 - _blinkStart) % BlinkCycleMs;
+        bool visible = phase < BlinkCycleMs - BlinkOffMs;
+        if (_dot.Visible != visible)
+            _dot.Visible = visible;
+    }
+
+    private void UpdateOpacity()
+    {
+        if (!Visible)
+            return;
+
+        double target = Bounds.Contains(Cursor.Position) ? 1.0 : _idleOpacity;
+        if (Math.Abs(Opacity - target) > 0.001)
+            Opacity = target;
+    }
 
     private void UpdateTime()
     {
@@ -349,6 +410,7 @@ public sealed class ControlBarForm : Form
         {
             _timer.Stop();
             _timer.Dispose();
+            _toolTip.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -358,6 +420,9 @@ public sealed class ControlBarForm : Form
         public Color NormalBackColor = Color.FromArgb(58, 62, 70);
         public Color HoverBackColor = Color.FromArgb(74, 80, 90);
         public Color PressedBackColor = Color.FromArgb(46, 50, 58);
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public BarIcon Icon { get; set; }
 
         private bool _hover;
         private bool _pressed;
@@ -420,8 +485,65 @@ public sealed class ControlBarForm : Form
             using (var brush = new SolidBrush(back))
                 g.FillPath(brush, path);
 
-            TextRenderer.DrawText(g, Text, Font, ClientRectangle, ForeColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            if (Icon == BarIcon.None)
+            {
+                TextRenderer.DrawText(g, Text, Font, ClientRectangle, ForeColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            }
+            else
+            {
+                DrawIcon(g, ClientRectangle, Icon, ForeColor);
+            }
+        }
+
+        private static void DrawIcon(Graphics g, Rectangle area, BarIcon icon, Color color)
+        {
+            using var brush = new SolidBrush(color);
+            int cx = area.Left + area.Width / 2;
+            int cy = area.Top + area.Height / 2;
+
+            int boxSize = Math.Min(area.Width, area.Height);
+            int outerGap = Math.Max(Dpi.S(7), boxSize / 4);
+            int inner = Math.Max(Dpi.S(6), boxSize - outerGap * 2);
+            var box = new Rectangle(cx - inner / 2, cy - inner / 2, inner, inner);
+
+            switch (icon)
+            {
+                case BarIcon.Stop:
+                    g.FillRectangle(brush, box);
+                    break;
+                case BarIcon.Close:
+                {
+                    float thickness = Math.Max(1.5f, boxSize / 14f);
+                    using var pen = new Pen(color, thickness)
+                    {
+                        StartCap = LineCap.Round,
+                        EndCap = LineCap.Round
+                    };
+                    float inset = thickness / 2f;
+                    g.DrawLine(pen, box.Left + inset, box.Top + inset, box.Right - inset, box.Bottom - inset);
+                    g.DrawLine(pen, box.Right - inset, box.Top + inset, box.Left + inset, box.Bottom - inset);
+                    break;
+                }
+                case BarIcon.Play:
+                    g.FillPolygon(brush, new[]
+                    {
+                        new Point(box.Left, box.Top),
+                        new Point(box.Left, box.Bottom),
+                        new Point(box.Right, cy)
+                    });
+                    break;
+                case BarIcon.Pause:
+                {
+                    int barW = Math.Max(Dpi.S(2), (int)Math.Round(box.Width * 0.3));
+                    int gap = Math.Max(Dpi.S(2), box.Width - barW * 2);
+                    if (barW * 2 + gap > box.Width)
+                        barW = Math.Max(1, (box.Width - gap) / 2);
+                    g.FillRectangle(brush, box.Left, box.Top, barW, box.Height);
+                    g.FillRectangle(brush, box.Right - barW, box.Top, barW, box.Height);
+                    break;
+                }
+            }
         }
     }
 }
