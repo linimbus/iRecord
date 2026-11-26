@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Drawing;
 using iRecord.Capture;
 using iRecord.UI;
@@ -23,7 +23,6 @@ public sealed class TrayApplicationContext : ApplicationContext
     private bool _panelShouldReturn;
     private bool _editorsTopMostSuspended;
     private bool _capturingScreenshot;
-    private bool _micVolumeDirty;
 
     public TrayApplicationContext()
     {
@@ -379,9 +378,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 ? (0f, 0f)
                 : (_session.SystemAudioLevel, _session.MicAudioLevel),
             _settings.SystemLevelGain,
-            _settings.MicLevelGain,
-            session.MicVolumePercent,
-            OnMicVolumeChanged);
+            _settings.MicLevelGain);
         _bar.PauseClicked += TogglePause;
         _bar.StopClicked += StopRecording;
         _bar.Show();
@@ -401,20 +398,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         RebuildMenu();
     }
 
-    private void OnMicVolumeChanged(int percent)
-    {
-        _session?.SetMicVolume(percent);
-        _settings.MicVolume = percent;
-        _micVolumeDirty = true;
-    }
-
-    private void SaveMicVolumeIfNeeded()
-    {
-        if (!_micVolumeDirty) return;
-        _micVolumeDirty = false;
-        try { SettingsStore.Save(_settings); } catch { }
-    }
-
     private void CloseBorder()
     {
         _border?.Close();
@@ -425,8 +408,6 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void StopRecording()
     {
         if (_session == null || _session.IsEncoding) return;
-
-        SaveMicVolumeIfNeeded();
 
         var session = _session;
         session.Stop();
@@ -456,7 +437,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         Post(() =>
         {
             _session = null;
-            SaveMicVolumeIfNeeded();
             _bar?.Close();
             _bar?.Dispose();
             _bar = null;
@@ -473,7 +453,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         Post(() =>
         {
             _session = null;
-            SaveMicVolumeIfNeeded();
             _bar?.Close();
             _bar?.Dispose();
             _bar = null;
@@ -829,14 +808,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         bool panelTopMost = SuspendPanelTopMost();
         try
         {
-            string text = Localization.T("about_text");
-            string link = Localization.T("about_official_link") +
-                          "https://github.com/linimbus/iRecordWindows";
-            text = text.Contains("© 2026 iRecord")
-                ? text.Replace("© 2026 iRecord", link + "\n\n© 2026 iRecord")
-                : text + "\n\n" + link;
-            MessageBox.Show(text, Localization.T("about_title"),
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            using var about = new AboutForm();
+            about.ShowDialog();
         }
         finally
         {

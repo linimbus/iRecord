@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using iRecord.App;
@@ -7,7 +6,7 @@ namespace iRecord.UI;
 
 public sealed class ControlBarForm : Form
 {
-    private const int MeterSegments = 10;
+    private const int MeterSegments = 5;
 
     private static readonly Color BackgroundColor = Color.FromArgb(26, 28, 32);
     private static readonly Color MeterLowColor = Color.FromArgb(96, 204, 128);
@@ -16,8 +15,6 @@ public sealed class ControlBarForm : Form
     private static readonly Color MeterEmptyColor = Color.FromArgb(48, 52, 60);
     private static readonly Color MicMeterColor = Color.FromArgb(86, 186, 255);
     private static readonly Color MicMeterHighColor = Color.FromArgb(150, 225, 255);
-    private static readonly Color MicAccentColor = Color.FromArgb(96, 176, 255);
-    private static readonly Color MicLabelColor = Color.FromArgb(130, 210, 255);
 
     private readonly Func<TimeSpan> _elapsedProvider;
     private readonly Func<(float System, float Mic)> _levelProvider;
@@ -25,15 +22,11 @@ public sealed class ControlBarForm : Form
     private readonly bool _showMicLevel;
     private readonly float _systemLevelGain;
     private readonly float _micLevelGain;
-    private readonly Action<int>? _micVolumeChanged;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly Label _dot;
-    private readonly Label _time;
+    private readonly LedTimeDisplay _time;
     private readonly BarButton _pause;
     private readonly BarButton _stop;
-    private readonly Label? _micLabel;
-    private readonly SegmentSlider? _micSlider;
-    private readonly BadgeLabel? _micValue;
 
     private Rectangle _meterBounds;
     private bool _paused;
@@ -52,9 +45,7 @@ public sealed class ControlBarForm : Form
         bool showMicLevel,
         Func<(float System, float Mic)> levelProvider,
         int systemLevelGain,
-        int micLevelGain,
-        int micVolumePercent,
-        Action<int>? micVolumeChanged = null)
+        int micLevelGain)
     {
         _elapsedProvider = elapsedProvider;
         _showSystemLevel = showSystemLevel;
@@ -62,10 +53,10 @@ public sealed class ControlBarForm : Form
         _levelProvider = levelProvider;
         _systemLevelGain = Math.Clamp(systemLevelGain, 1, 10);
         _micLevelGain = Math.Clamp(micLevelGain, 1, 10);
-        _micVolumeChanged = micVolumeChanged;
 
         bool hasMic = _showMicLevel;
         bool hasMeter = _showSystemLevel || _showMicLevel;
+        bool bothMeters = _showSystemLevel && _showMicLevel;
 
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -77,18 +68,20 @@ public sealed class ControlBarForm : Form
         AutoScaleMode = AutoScaleMode.None;
 
         const int dotW = 18;
-        const int timeW = 100;
-        const int meterW = 190;
-        const int buttonW = 84;
+        const int timeW = 104;
+        const int buttonW = 60;
         const int gap = 8;
-        const int groupGap = 14;
-        const int padding = 16;
+        const int timeGap = 4;
+        const int groupGap = 6;
+        const int buttonGap = 8;
+        const int padding = 14;
+        int meterW = hasMeter ? (bothMeters ? 40 : 16) : 0;
 
-        int contentW = dotW + gap + timeW;
+        int contentW = dotW + timeGap + timeW;
         if (hasMeter) contentW += groupGap + meterW;
-        contentW += groupGap + buttonW + gap + buttonW;
+        contentW += buttonGap + buttonW + gap + buttonW;
 
-        Size = new Size(Dpi.S(contentW + padding * 2), Dpi.S(hasMic ? 116 : 64));
+        Size = new Size(Dpi.S(contentW + padding * 2), Dpi.S(hasMic ? 58 : 32));
 
         _dot = new Label
         {
@@ -100,14 +93,11 @@ public sealed class ControlBarForm : Form
             BackColor = Color.Transparent
         };
 
-        _time = new Label
+        _time = new LedTimeDisplay
         {
             Text = "00:00:00",
             ForeColor = Color.White,
-            Font = new Font("Consolas", 13f, FontStyle.Bold),
-            AutoSize = false,
-            TextAlign = ContentAlignment.MiddleLeft,
-            BackColor = Color.Transparent
+            BackColor = BackgroundColor
         };
 
         _pause = new BarButton
@@ -135,47 +125,6 @@ public sealed class ControlBarForm : Form
         Controls.Add(_pause);
         Controls.Add(_stop);
 
-        if (hasMic)
-        {
-            var micLabel = new Label
-            {
-                Text = "MIC",
-                ForeColor = MicLabelColor,
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleLeft,
-                BackColor = Color.Transparent
-            };
-
-            var micSlider = new SegmentSlider
-            {
-                Minimum = 0,
-                Maximum = 200,
-                Value = Math.Clamp(micVolumePercent, 0, 200)
-            };
-
-            var micValue = new BadgeLabel
-            {
-                Text = $"{micSlider.Value}%",
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
-            };
-
-            micSlider.ValueChanged += (_, _) =>
-            {
-                micValue.Text = $"{micSlider.Value}%";
-                _micVolumeChanged?.Invoke(micSlider.Value);
-            };
-
-            _micLabel = micLabel;
-            _micSlider = micSlider;
-            _micValue = micValue;
-
-            Controls.Add(micLabel);
-            Controls.Add(micSlider);
-            Controls.Add(micValue);
-        }
-
         LayoutContent();
 
         foreach (Control c in new Control[] { this, _dot, _time })
@@ -192,23 +141,26 @@ public sealed class ControlBarForm : Form
     private void LayoutContent()
     {
         int dotW = Dpi.S(18);
-        int timeW = Dpi.S(100);
-        int meterW = Dpi.S(190);
-        int buttonW = Dpi.S(84);
+        int timeW = Dpi.S(104);
+        int buttonW = Dpi.S(60);
         int buttonH = Dpi.S(32);
         int gap = Dpi.S(8);
-        int groupGap = Dpi.S(14);
+        int timeGap = Dpi.S(4);
+        int groupGap = Dpi.S(6);
+        int buttonGap = Dpi.S(8);
         bool hasMeter = _showSystemLevel || _showMicLevel;
+        bool bothMeters = _showSystemLevel && _showMicLevel;
+        int meterW = hasMeter ? Dpi.S(bothMeters ? 40 : 16) : 0;
 
-        int contentW = dotW + gap + timeW;
+        int contentW = dotW + timeGap + timeW;
         if (hasMeter) contentW += groupGap + meterW;
-        contentW += groupGap + buttonW + gap + buttonW;
+        contentW += buttonGap + buttonW + gap + buttonW;
 
         int x = (ClientSize.Width - contentW) / 2;
-        int topY = Dpi.S(16);
+        int topY = (ClientSize.Height - buttonH) / 2;
 
         _dot.Bounds = new Rectangle(x, topY, dotW, buttonH);
-        x += dotW + gap;
+        x += dotW + timeGap;
 
         _time.Bounds = new Rectangle(x, topY, timeW, buttonH);
         x += timeW;
@@ -216,8 +168,8 @@ public sealed class ControlBarForm : Form
         if (hasMeter)
         {
             x += groupGap;
-            int meterH = _showSystemLevel && _showMicLevel ? Dpi.S(44) : Dpi.S(28);
-            _meterBounds = new Rectangle(x, Dpi.S(32) - meterH / 2, meterW, meterH);
+            int meterH = Dpi.S(MeterSegments * 4 + (MeterSegments - 1) * 2);
+            _meterBounds = new Rectangle(x, (ClientSize.Height - meterH) / 2, meterW, meterH);
             x += meterW;
         }
         else
@@ -225,28 +177,10 @@ public sealed class ControlBarForm : Form
             _meterBounds = Rectangle.Empty;
         }
 
-        x += groupGap;
+        x += buttonGap;
         _pause.Bounds = new Rectangle(x, topY, buttonW, buttonH);
         x += buttonW + gap;
         _stop.Bounds = new Rectangle(x, topY, buttonW, buttonH);
-
-        if (_micLabel != null && _micSlider != null && _micValue != null)
-        {
-            int micLabelW = Dpi.S(36);
-            int micValueW = Dpi.S(56);
-            int micGap = Dpi.S(8);
-            int sliderW = Dpi.S(240);
-            int micContentW = micLabelW + micGap + sliderW + micGap + micValueW;
-            int mx = (ClientSize.Width - micContentW) / 2;
-            int labelY = Dpi.S(78);
-            int labelH = Dpi.S(24);
-
-            _micLabel.Bounds = new Rectangle(mx, labelY, micLabelW, labelH);
-            mx += micLabelW + micGap;
-            _micSlider.Bounds = new Rectangle(mx, Dpi.S(77), sliderW, Dpi.S(26));
-            mx += sliderW + micGap;
-            _micValue.Bounds = new Rectangle(mx, labelY, micValueW, labelH);
-        }
     }
 
     protected override CreateParams CreateParams
@@ -283,55 +217,43 @@ public sealed class ControlBarForm : Form
         using (var path = RoundedRect(new Rectangle(inset, inset, Width - inset * 2, Height - inset * 2), Dpi.S(12)))
             g.DrawPath(pen, path);
 
-        if (_showMicLevel)
-        {
-            using var separator = new Pen(Color.FromArgb(38, 255, 255, 255), 1f);
-            g.DrawLine(separator, Dpi.S(16), Dpi.S(64), Width - Dpi.S(16), Dpi.S(64));
-        }
-
         if (_meterBounds.IsEmpty) return;
 
-        int rowGap = Dpi.S(6);
-        if (_showSystemLevel && _showMicLevel)
+        int count = (_showSystemLevel ? 1 : 0) + (_showMicLevel ? 1 : 0);
+        int columnGap = Dpi.S(8);
+        int columnW = (int)Math.Round((_meterBounds.Width - columnGap * (count - 1)) / (double)count);
+        int x = _meterBounds.X;
+
+        if (_showSystemLevel)
         {
-            int rowH = (_meterBounds.Height - rowGap) / 2;
-            DrawBatteryMeter(g, new Rectangle(_meterBounds.X, _meterBounds.Y, _meterBounds.Width, rowH), "SYS", _displaySystem, false);
-            DrawBatteryMeter(g, new Rectangle(_meterBounds.X, _meterBounds.Y + rowH + rowGap, _meterBounds.Width, rowH), "MIC", _displayMic, true);
+            DrawVerticalMeter(g, new Rectangle(x, _meterBounds.Y, columnW, _meterBounds.Height),
+                _displaySystem, false);
+            x += columnW + columnGap;
         }
-        else if (_showSystemLevel)
+
+        if (_showMicLevel)
         {
-            DrawBatteryMeter(g, _meterBounds, "SYS", _displaySystem, false);
-        }
-        else if (_showMicLevel)
-        {
-            DrawBatteryMeter(g, _meterBounds, "MIC", _displayMic, true);
+            DrawVerticalMeter(g, new Rectangle(x, _meterBounds.Y, columnW, _meterBounds.Height),
+                _displayMic, true);
         }
     }
 
-    private static void DrawBatteryMeter(Graphics g, Rectangle area, string label, float level, bool mic)
+    private static void DrawVerticalMeter(Graphics g, Rectangle area, float level, bool mic)
     {
-        int labelW = Dpi.S(40);
-        using (var font = new Font("Segoe UI", 8.5f, FontStyle.Bold))
-        using (var textBrush = new SolidBrush(mic ? MicLabelColor : Color.FromArgb(200, 255, 255, 255)))
-        using (var format = new StringFormat { LineAlignment = StringAlignment.Center })
-            g.DrawString(label, font, textBrush, new RectangleF(area.X, area.Y, labelW, area.Height), format);
-
+        int segH = Dpi.S(4);
         int gap = Dpi.S(2);
-        int barX = area.X + labelW;
-        int barW = area.Width - labelW;
-        int segW = (barW - gap * (MeterSegments - 1)) / MeterSegments;
-        if (segW < 1) return;
-
-        int h = Math.Min(Dpi.S(8), Math.Max(Dpi.S(4), area.Height - Dpi.S(2)));
-        int top = area.Y + (area.Height - h) / 2;
+        int barW = Math.Max(1, Math.Min(Dpi.S(16), area.Width));
+        int x = area.X + (area.Width - barW) / 2;
+        int bottom = area.Bottom;
         int lit = (int)Math.Ceiling(Math.Clamp(level, 0f, 1f) * MeterSegments);
 
         using var border = new Pen(Color.FromArgb(60, 255, 255, 255), 1f);
 
         for (int i = 0; i < MeterSegments; i++)
         {
-            var rect = new Rectangle(barX + i * (segW + gap), top, segW, h);
-            using var path = RoundedRect(rect, Dpi.S(2));
+            int y = bottom - (i + 1) * segH - i * gap;
+            var rect = new Rectangle(x, y, barW, segH);
+            using var path = RoundedRect(rect, Dpi.S(1));
             using var fill = new SolidBrush(i < lit ? SegmentColor(i, mic) : MeterEmptyColor);
             g.FillPath(fill, path);
             g.DrawPath(border, path);
@@ -340,11 +262,11 @@ public sealed class ControlBarForm : Form
 
     private static Color SegmentColor(int index, bool mic)
     {
-        if (mic) return index >= 7 ? MicMeterHighColor : MicMeterColor;
+        if (mic) return index >= 4 ? MicMeterHighColor : MicMeterColor;
         return index switch
         {
-            <= 4 => MeterLowColor,
-            <= 7 => MeterMidColor,
+            <= 2 => MeterLowColor,
+            3 => MeterMidColor,
             _ => MeterHighColor
         };
     }
@@ -429,163 +351,6 @@ public sealed class ControlBarForm : Form
             _timer.Dispose();
         }
         base.Dispose(disposing);
-    }
-
-    private sealed class BadgeLabel : Control
-    {
-        public BadgeLabel()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = BackgroundColor;
-            ForeColor = Color.White;
-            TabStop = false;
-        }
-
-        protected override void OnTextChanged(EventArgs e)
-        {
-            base.OnTextChanged(e);
-            Invalidate();
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            using (var background = new SolidBrush(BackgroundColor))
-                g.FillRectangle(background, ClientRectangle);
-
-            var rect = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
-            using var path = RoundedRect(rect, Dpi.S(6));
-            using (var fill = new SolidBrush(Color.FromArgb(42, 82, 138)))
-                g.FillPath(fill, path);
-            using (var border = new Pen(Color.FromArgb(150, 90, 176, 255), 1f))
-                g.DrawPath(border, path);
-
-            TextRenderer.DrawText(g, Text, Font, ClientRectangle, ForeColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-        }
-    }
-
-    private sealed class SegmentSlider : Control
-    {
-        private const int Cells = 10;
-
-        private int _value = 100;
-        private bool _dragging;
-
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Minimum { get; set; }
-
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Maximum { get; set; } = 200;
-
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int Value
-        {
-            get => _value;
-            set
-            {
-                int clamped = Math.Clamp(value, Minimum, Maximum);
-                if (clamped == _value) return;
-                _value = clamped;
-                ValueChanged?.Invoke(this, EventArgs.Empty);
-                Invalidate();
-            }
-        }
-
-        public event EventHandler? ValueChanged;
-
-        public SegmentSlider()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = BackgroundColor;
-            Cursor = Cursors.Hand;
-            TabStop = false;
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            using (var background = new SolidBrush(BackgroundColor))
-                g.FillRectangle(background, ClientRectangle);
-
-            int margin = Dpi.S(1);
-            int gap = Dpi.S(3);
-            int totalW = Width - margin * 2;
-            if (totalW <= 0) return;
-
-            int segW = (totalW - gap * (Cells - 1)) / Cells;
-            if (segW < 1) return;
-
-            int h = Math.Min(Dpi.S(6), Math.Max(Dpi.S(4), Height - Dpi.S(6)));
-            int top = (Height - h) / 2;
-            double fraction = (double)(Value - Minimum) / Math.Max(1, Maximum - Minimum);
-            int filled = (int)Math.Round(Math.Clamp(fraction, 0d, 1d) * totalW);
-
-            using var border = new Pen(Color.FromArgb(75, 255, 255, 255), 1f);
-
-            for (int i = 0; i < Cells; i++)
-            {
-                int x = margin + i * (segW + gap);
-                var rect = new Rectangle(x, top, segW, h);
-                using var path = RoundedRect(rect, Dpi.S(3));
-
-                using (var empty = new SolidBrush(MeterEmptyColor))
-                    g.FillPath(empty, path);
-
-                int overlap = Math.Clamp(filled - (x - margin), 0, segW);
-                if (overlap > 0)
-                {
-                    var state = g.Save();
-                    g.SetClip(path);
-                    using (var active = new SolidBrush(MicAccentColor))
-                        g.FillRectangle(active, rect.X, rect.Y, overlap, rect.Height);
-                    using (var shine = new SolidBrush(Color.FromArgb(70, 255, 255, 255)))
-                        g.FillRectangle(shine, rect.X + Dpi.S(1), rect.Y + Dpi.S(1),
-                            Math.Max(0, overlap - Dpi.S(2)), Dpi.S(2));
-                    g.Restore(state);
-                }
-
-                g.DrawPath(border, path);
-            }
-        }
-
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            if (e.Button == MouseButtons.Left)
-            {
-                _dragging = true;
-                Capture = true;
-                SetFromX(e.X);
-            }
-            base.OnMouseDown(e);
-        }
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            if (_dragging) SetFromX(e.X);
-            base.OnMouseMove(e);
-        }
-
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            _dragging = false;
-            Capture = false;
-            base.OnMouseUp(e);
-        }
-
-        private void SetFromX(int x)
-        {
-            int margin = Dpi.S(1);
-            int totalW = Math.Max(1, Width - margin * 2);
-            double fraction = Math.Clamp((x - margin) / (double)totalW, 0d, 1d);
-            Value = (int)Math.Round(Minimum + fraction * (Maximum - Minimum));
-        }
     }
 
     private sealed class BarButton : Button

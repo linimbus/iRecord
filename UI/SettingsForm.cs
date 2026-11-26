@@ -15,6 +15,7 @@ public sealed class SettingsForm : Form
     private readonly Label _audioLabel = new();
     private readonly Label _systemGainLabel = new();
     private readonly Label _micGainLabel = new();
+    private readonly Label _micVolumeLabel = new();
     private readonly Label _mouseLabel = new();
     private readonly Label _outputLabel = new();
     private readonly Label _ffmpegLabel = new();
@@ -44,6 +45,7 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _gifFps = new();
     private readonly NumericUpDown _systemGain = new();
     private readonly NumericUpDown _micGain = new();
+    private readonly NumericUpDown _micVolume = new();
     private readonly NumericUpDown _opacity = new();
     private readonly TextBox _outputText = new();
     private readonly TextBox _ffmpegText = new();
@@ -147,6 +149,7 @@ public sealed class SettingsForm : Form
         Row(_audioLabel, _audioCombo, leftLabelX, leftFieldX, fieldW, ref leftY);
         Row(_systemGainLabel, _systemGain, leftLabelX, leftFieldX, fieldW, ref leftY);
         Row(_micGainLabel, _micGain, leftLabelX, leftFieldX, fieldW, ref leftY);
+        Row(_micVolumeLabel, _micVolume, leftLabelX, leftFieldX, fieldW, ref leftY);
         Row(_mouseLabel, _mouseCombo, leftLabelX, leftFieldX, fieldW, ref leftY);
 
         Section(_hotkeysHeader, hotkeysSep, rightLabelX, columnW, ref rightY);
@@ -212,6 +215,8 @@ public sealed class SettingsForm : Form
         _systemGain.Maximum = 10;
         _micGain.Minimum = 1;
         _micGain.Maximum = 10;
+        _micVolume.Minimum = 0;
+        _micVolume.Maximum = 200;
         _opacity.Minimum = 20;
         _opacity.Maximum = 100;
 
@@ -221,13 +226,13 @@ public sealed class SettingsForm : Form
             _hotkeysHeader, hotkeysSep, _outputHeader, outputSep, footerSep,
             _languageLabel, _modeLabel, _opacityLabel,
             _formatLabel, _qualityLabel, _fpsLabel, _gifFpsLabel, _audioLabel,
-            _systemGainLabel, _micGainLabel, _mouseLabel,
+            _systemGainLabel, _micGainLabel, _micVolumeLabel, _mouseLabel,
             _hotkeyStartLabel, _hotkeyStopLabel, _hotkeyPauseLabel, _hotkeyShowPanelLabel,
             _hotkeyScreenshotSingleLabel, _hotkeyScreenshotRegionLabel, _hotkeyScreenshotWindowLabel,
             _hotkeyScreenshotScrollLabel, _hint,
             _outputLabel, _ffmpegLabel,
             _languageCombo, _modeCombo, _opacity, _formatCombo, _qualityCombo, _fps, _gifFps,
-            _audioCombo, _systemGain, _micGain, _mouseCombo,
+            _audioCombo, _systemGain, _micGain, _micVolume, _mouseCombo,
             _hotStart, _hotStop, _hotPause, _hotShowPanel,
             _hotScreenshotSingle, _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll,
             _outputText, _ffmpegText, browseOutput, browseFfmpeg, detect, _save, _cancel
@@ -238,7 +243,7 @@ public sealed class SettingsForm : Form
                  {
                      _languageCombo, _modeCombo, _opacity,
                      _formatCombo, _qualityCombo, _fps, _gifFps, _audioCombo,
-                     _systemGain, _micGain, _mouseCombo,
+                     _systemGain, _micGain, _micVolume, _mouseCombo,
                      _hotStart, _hotStop, _hotPause, _hotShowPanel,
                      _hotScreenshotSingle, _hotScreenshotRegion, _hotScreenshotWindow, _hotScreenshotScroll,
                      _outputText, browseOutput, _ffmpegText, browseFfmpeg, detect, _save, _cancel
@@ -276,6 +281,7 @@ public sealed class SettingsForm : Form
         _audioLabel.Text = Localization.T("settings_audio");
         _systemGainLabel.Text = Localization.T("settings_system_gain");
         _micGainLabel.Text = Localization.T("settings_mic_gain");
+        _micVolumeLabel.Text = Localization.T("settings_mic_volume");
         _mouseLabel.Text = Localization.T("settings_mouse");
         _outputLabel.Text = Localization.T("settings_output");
         _ffmpegLabel.Text = Localization.T("settings_ffmpeg");
@@ -337,6 +343,7 @@ public sealed class SettingsForm : Form
         _gifFps.Value = Math.Clamp(_result.GifFps, 5, 30);
         _systemGain.Value = Math.Clamp(_result.SystemLevelGain, 1, 10);
         _micGain.Value = Math.Clamp(_result.MicLevelGain, 1, 10);
+        _micVolume.Value = Math.Clamp(_result.MicVolume, 0, 200);
         _opacity.Value = Math.Clamp(_result.PanelOpacity, 20, 100);
         UpdateFormatDependentState();
         _outputText.Text = _result.OutputFolder;
@@ -429,6 +436,7 @@ public sealed class SettingsForm : Form
         _result.GifFps = (int)_gifFps.Value;
         _result.SystemLevelGain = (int)_systemGain.Value;
         _result.MicLevelGain = (int)_micGain.Value;
+        _result.MicVolume = (int)_micVolume.Value;
         _result.PanelOpacity = (int)_opacity.Value;
         _result.OutputFolder = _outputText.Text.Trim();
         _result.FfmpegPath = _ffmpegText.Text.Trim();
