@@ -1,3 +1,5 @@
+// iRecord - screenshot annotation editor.
+// Element model covers shapes, text, numbers, mosaic, freehand drawing, zoom/pan, resize, OCR, and save/copy.
 using System.Buffers;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -8,6 +10,10 @@ using iRecord.App;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Full annotation workstation for a captured PNG. Elements stay editable and are rendered on top of a base bitmap.
+/// Undo is snapshot-based and intentionally unlimited; keep expensive bitmaps out of per-action snapshots.
+/// </summary>
 public sealed class ImageEditorForm : Form
 {
     private static readonly Color BorderColor = Color.FromArgb(208, 214, 222);
@@ -84,6 +90,7 @@ public sealed class ImageEditorForm : Form
     private Bitmap _image;
     private Bitmap _baseImage;
     private string _path;
+    // Base bitmaps are retained so undo snapshots can share them without cloning large images.
     private readonly List<Bitmap> _allBases = new();
     private readonly List<EditorSnapshot> _undo = new();
     private readonly List<EditorElement> _elements = new();
@@ -417,6 +424,10 @@ public sealed class ImageEditorForm : Form
         }
     }
 
+    /// <summary>
+    /// Starts a new annotation, inline text edit, selection/move, or pan depending on the active tool.
+    /// Coordinates are converted from display space to source-image pixels before editing.
+    /// </summary>
     private void CanvasMouseDown(EditorCanvas canvas, MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Middle)
@@ -808,6 +819,7 @@ public sealed class ImageEditorForm : Form
             CommitInlineText();
     }
 
+    /// <summary>Converts the inline TextBox into a movable Text element and refreshes the canvas.</summary>
     private void CommitInlineText()
     {
         if (_inlineClosing || _inlineInput == null || _inlineOverlay == null)
@@ -854,6 +866,10 @@ public sealed class ImageEditorForm : Form
         }
     }
 
+    /// <summary>
+    /// Rebuilds the displayed frame from the base image plus every element, then draws
+    /// selection handles/inline overlays and applies the current zoom/pan transform.
+    /// </summary>
     private void RenderCanvas(Graphics g, Size size)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1076,6 +1092,7 @@ public sealed class ImageEditorForm : Form
         }
     }
 
+    /// <summary>Stores a lightweight snapshot (base reference + cloned elements + counter).</summary>
     private void PushUndo()
     {
         _undo.Add(new EditorSnapshot
@@ -1086,6 +1103,7 @@ public sealed class ImageEditorForm : Form
         });
     }
 
+    /// <summary>Restores the previous unlimited-undo snapshot and cancels any inline edit.</summary>
     private void Undo()
     {
         CommitInlineTextIfAny();
@@ -1145,6 +1163,7 @@ public sealed class ImageEditorForm : Form
         ApplyResize(dialog.TargetWidth, dialog.TargetHeight);
     }
 
+    /// <summary>High-quality resize that scales the base image and every annotation proportionally.</summary>
     private void ApplyResize(int width, int height)
     {
         if (width == _baseImage.Width && height == _baseImage.Height)
@@ -1188,6 +1207,7 @@ public sealed class ImageEditorForm : Form
         _ = RecognizeTextAsync();
     }
 
+    /// <summary>Runs Windows OCR on the current base image and shows the result dialog.</summary>
     private async Task RecognizeTextAsync()
     {
         try
@@ -1658,6 +1678,10 @@ public sealed class ImageEditorForm : Form
         }
     }
 
+    /// <summary>
+    /// One editable annotation. Shape/freeform/text/number/mosaic share this model so move,
+    /// scale, hit-test, undo, and rendering can be handled uniformly.
+    /// </summary>
     private sealed class EditorElement
     {
         public ElementKind Kind { get; init; } = ElementKind.Shape;
@@ -1774,6 +1798,7 @@ public sealed class ImageEditorForm : Form
         }
     }
 
+    /// <summary>Undo entry: a base image reference plus a deep clone of the element list.</summary>
     private sealed class EditorSnapshot
     {
         public Bitmap Base { get; init; } = null!;
@@ -2236,6 +2261,7 @@ public sealed class ImageEditorForm : Form
         canvas.Cursor = Cursors.Hand;
     }
 
+    /// <summary>Double-buffered drawing surface that forwards mouse input to the form.</summary>
     private sealed class EditorCanvas : Control
     {
         private readonly ImageEditorForm _owner;
@@ -2278,6 +2304,7 @@ public sealed class ImageEditorForm : Form
         }
     }
 
+    /// <summary>Transparent overlay that mirrors inline TextBox text onto the image surface.</summary>
     private sealed class InlineTextOverlay : Control
     {
         private readonly ImageEditorForm _owner;
@@ -2296,6 +2323,7 @@ public sealed class ImageEditorForm : Form
         }
     }
 
+    /// <summary>Top toolbar: tool selection, color/line/font controls, badge counter, and actions.</summary>
     private sealed class EditorToolbarPanel : Panel
     {
         private readonly ImageEditorForm _editor;
@@ -2572,6 +2600,7 @@ public sealed class ImageEditorForm : Form
         }
     }
 
+    /// <summary>Custom-painted toolbar button that can show an icon, badge number, and active state.</summary>
     private sealed class IconToolButton : Button
     {
         private readonly EditorIcon _icon;

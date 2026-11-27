@@ -1,11 +1,20 @@
+// iRecord - window hover/click picker.
+// Filters visible top-level windows and records a hit-test rectangle for screenshots/recording.
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using iRecord.App;
 
 namespace iRecord.Capture;
 
+/// <summary>
+/// A selectable top-level window and its screen rectangle.
+/// </summary>
 public readonly record struct WindowHit(IntPtr Handle, string Title, Rectangle ScreenRect);
 
+/// <summary>
+/// Full-virtual-screen overlay that highlights the top-level window under the cursor
+/// and returns its HWND/rectangle for window screenshots or window recording.
+/// </summary>
 public sealed class WindowPickerForm : Form
 {
     private readonly Rectangle _virtualScreen;
@@ -44,6 +53,10 @@ public sealed class WindowPickerForm : Form
         }
     }
 
+    /// <summary>
+    /// Enumerates visible top-level windows, ignoring this process, tool windows, minimized
+    /// windows, and DWM-cloaked windows, and returns the topmost hit at the point.
+    /// </summary>
     public static WindowHit? FindAt(Point screenPoint)
     {
         WindowHit? result = null;

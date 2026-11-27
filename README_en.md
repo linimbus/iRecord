@@ -117,6 +117,8 @@ iRecord-cli.exe record --mode window --window notepad --duration 10 --format web
 
 ## Project structure
 
+See [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for the detailed directory/source-file guide and incremental AI development notes.
+
 ```
 Program.cs                     Entry point (tray mode / CLI mode)
 App/                           Tray, settings, localization, hotkeys, settings persistence

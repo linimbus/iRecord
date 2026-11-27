@@ -1,8 +1,13 @@
+// iRecord - image dimension dialog.
+// Keeps width/height/percent in sync with optional aspect-ratio locking and size limits.
 using System.Drawing;
 using iRecord.App;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Small modal dialog used before the image editor applies a high-quality resize.
+/// </summary>
 public sealed class ImageResizeForm : Form
 {
     private const int MaxDimension = 20000;
@@ -19,6 +24,7 @@ public sealed class ImageResizeForm : Form
     public int TargetWidth => (int)_width.Value;
     public int TargetHeight => (int)_height.Value;
 
+    /// <summary>Initializes width/height/percent fields and enforces safe pixel limits.</summary>
     public ImageResizeForm(int width, int height)
     {
         _originalWidth = Math.Max(1, width);

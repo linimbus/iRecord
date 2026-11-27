@@ -1,9 +1,15 @@
+// iRecord - FFmpeg discovery and process helpers.
+// MP4 is recorded natively; FFmpeg is used for MKV/MOV remuxing and WebM/GIF conversion.
 using System.Diagnostics;
 
 namespace iRecord.Capture;
 
+/// <summary>
+/// Locates ffmpeg.exe and runs it without a console window, capturing stdout/stderr.
+/// </summary>
 public static class FfmpegTools
 {
+    /// <summary>Searches the app folder, the configured dev path, and PATH for ffmpeg.exe.</summary>
     public static string? Detect()
     {
         var candidates = new List<string>();
@@ -38,6 +44,7 @@ public static class FfmpegTools
         return null;
     }
 
+    /// <summary>Uses the configured executable when valid, otherwise falls back to <see cref="Detect"/>.</summary>
     public static string? Resolve(string? configured)
     {
         try
@@ -55,6 +62,7 @@ public static class FfmpegTools
         return Detect();
     }
 
+    /// <summary>Creates a console-less process start info with argument-list escaping.</summary>
     public static ProcessStartInfo CreateStartInfo(string ffmpeg, IEnumerable<string> args,
         bool redirectStdin = false, bool redirectStdout = false, bool redirectStderr = false)
     {
@@ -75,6 +83,7 @@ public static class FfmpegTools
         return psi;
     }
 
+    /// <summary>Runs FFmpeg to completion and returns the combined stdout/stderr for diagnostics.</summary>
     public static async Task<(bool Ok, string Output)> RunAsync(string ffmpeg, IEnumerable<string> args)
     {
         try

@@ -1,8 +1,13 @@
+// iRecord - settings persistence and normalization.
+// Reads/writes %APPDATA%\iRecord\settings.json and repairs missing or invalid values.
 using System.Text.Json;
 using iRecord.Capture;
 
 namespace iRecord.App;
 
+/// <summary>
+/// Loads, validates, and saves <see cref="AppSettings"/>. Invalid enum-like values fall back to safe defaults.
+/// </summary>
 public static class SettingsStore
 {
     public static string Directory => Path.Combine(
@@ -10,6 +15,7 @@ public static class SettingsStore
 
     public static string FilePath => Path.Combine(Directory, "settings.json");
 
+    /// <summary>Creates defaults based on the current user's Videos folder and detected FFmpeg.</summary>
     public static AppSettings CreateDefault()
     {
         string videos = Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
@@ -24,6 +30,7 @@ public static class SettingsStore
         };
     }
 
+    /// <summary>Loads and normalizes settings, falling back silently to defaults on any error.</summary>
     public static AppSettings Load()
     {
         try
@@ -48,6 +55,7 @@ public static class SettingsStore
         return def;
     }
 
+    /// <summary>Writes pretty-printed JSON to %APPDATA%\iRecord\settings.json.</summary>
     public static void Save(AppSettings settings)
     {
         System.IO.Directory.CreateDirectory(Directory);
@@ -55,6 +63,7 @@ public static class SettingsStore
         File.WriteAllText(FilePath, json);
     }
 
+    /// <summary>Clamps numeric ranges and repairs invalid language/format/audio/hotkey values.</summary>
     private static void Normalize(AppSettings s)
     {
         if (!Localization.IsSupported(s.Language))

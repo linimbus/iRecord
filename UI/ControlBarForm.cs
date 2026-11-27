@@ -1,3 +1,5 @@
+// iRecord - on-screen recording controls.
+// Shows elapsed LED time, live SYS/MIC meters, and pause/stop/hide buttons.
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -5,6 +7,9 @@ using iRecord.App;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Floating, draggable recording bar. It polls elapsed/level providers and is excluded from capture.
+/// </summary>
 public sealed class ControlBarForm : Form
 {
     private const int MeterSegments = 5;
@@ -56,6 +61,10 @@ public sealed class ControlBarForm : Form
     public event Action? PauseClicked;
     public event Action? StopClicked;
 
+    /// <summary>
+    /// Builds the compact bar from providers instead of owning the session. A 50 ms timer
+    /// refreshes elapsed time, animated meters, blink state, and idle transparency.
+    /// </summary>
     public ControlBarForm(
         Func<TimeSpan> elapsedProvider,
         bool showSystemLevel,
@@ -275,6 +284,7 @@ public sealed class ControlBarForm : Form
         }
     }
 
+    /// <summary>Draws the five-segment vertical level meter used for SYS and MIC.</summary>
     private static void DrawVerticalMeter(Graphics g, Rectangle area, float level)
     {
         int segH = Dpi.S(4);
@@ -300,6 +310,7 @@ public sealed class ControlBarForm : Form
     private static Color SegmentColor(int index) =>
         index >= 4 ? MicMeterHighColor : MicMeterColor;
 
+    /// <summary>Switches pause/play icon and freezes the recording indicator.</summary>
     public void SetPaused(bool paused)
     {
         _paused = paused;

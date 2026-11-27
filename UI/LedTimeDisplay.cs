@@ -1,8 +1,13 @@
+// iRecord - seven-segment LED time control.
+// Custom-paints digits and colons without relying on installed fonts.
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Lightweight seven-segment display used by the recording bar for elapsed time.
+/// </summary>
 internal sealed class LedTimeDisplay : Control
 {
     private static readonly bool[][] Digits =
@@ -34,6 +39,7 @@ internal sealed class LedTimeDisplay : Control
         Invalidate();
     }
 
+    /// <summary>Draws digits from the 7-segment table and auto-shrinks to fit the control width.</summary>
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;

@@ -1,9 +1,15 @@
+// iRecord - dedicated console launcher.
+// Initializes DPI/WinForms for headless recording borders, then delegates to CliRunner.
 using iRecord.Cli;
 
 namespace iRecord.CliLauncher;
 
+/// <summary>
+/// Console entry point for iRecord-cli. Keeps DPI/WinForms initialization out of the tray app.
+/// </summary>
 internal static class Program
 {
+    /// <summary>Initializes WinForms/DPI, then runs CliRunner and maps failures to exit code 1.</summary>
     [STAThread]
     private static int Main(string[] args)
     {

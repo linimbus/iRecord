@@ -1,9 +1,14 @@
+// iRecord - compact main control panel.
+// Paints a custom dark panel and raises intent events; the tray context performs the actions.
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using iRecord.App;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Frameless, draggable launcher with screenshot, recording, settings, folder, and pin actions.
+/// </summary>
 public sealed class MainPanelForm : Form
 {
     private static readonly Color PanelColor = Color.FromArgb(26, 28, 32);
@@ -42,6 +47,7 @@ public sealed class MainPanelForm : Form
     private Point _dragStartForm;
     private bool _dragging;
 
+    // Intent events keep this form presentation-only; TrayApplicationContext owns the actions.
     public event Action? SingleRegionRequested;
     public event Action? ScreenshotRegionRequested;
     public event Action? ScreenshotWindowRequested;
@@ -177,6 +183,7 @@ public sealed class MainPanelForm : Form
         _pin.SetActive(_pinned);
     }
 
+    /// <summary>Applies the configured idle opacity while keeping hover/active states readable.</summary>
     public void SetIdleOpacity(double opacity)
     {
         _idleOpacity = Math.Clamp(opacity, 0.2, 1.0);

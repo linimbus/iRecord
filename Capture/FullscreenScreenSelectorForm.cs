@@ -1,9 +1,14 @@
+// iRecord - multi-monitor fullscreen picker.
+// Shows a dimmed virtual-desktop snapshot and follows the mouse with a red monitor frame.
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using iRecord.UI;
 
 namespace iRecord.Capture;
 
+/// <summary>
+/// Lets the user choose a monitor for fullscreen recording; click selects, Esc/right-click cancels.
+/// </summary>
 public sealed class FullscreenScreenSelectorForm : Form
 {
     private static readonly Color BorderColor = Color.FromArgb(255, 34, 34);
@@ -51,6 +56,7 @@ public sealed class FullscreenScreenSelectorForm : Form
         UpdateSelectedScreen(Cursor.Position);
     }
 
+    /// <summary>Renders the desktop snapshot, dims all monitors except the hovered one, and outlines it in red.</summary>
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -93,6 +99,7 @@ public sealed class FullscreenScreenSelectorForm : Form
         UpdateSelectedScreen(Cursor.Position);
     }
 
+    /// <summary>Left click confirms the monitor under the cursor; right click cancels.</summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);

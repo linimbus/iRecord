@@ -1,8 +1,13 @@
+// iRecord - settings dialog.
+// Edits a cloned AppSettings and returns the validated result via Result.
 using iRecord.App;
 using iRecord.Capture;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Two-column settings editor for language, recording, hotkeys, output, and tools.
+/// </summary>
 public sealed class SettingsForm : Form
 {
     private readonly AppSettings _result;
@@ -88,6 +93,7 @@ public sealed class SettingsForm : Form
         Populate();
     }
 
+    /// <summary>Builds the two-column layout once; all labels are filled later by Localization.</summary>
     private void BuildUi()
     {
         const int margin = 20;
@@ -271,6 +277,7 @@ public sealed class SettingsForm : Form
     private Button _browseFfmpeg = null!;
     private Button _detectFfmpeg = null!;
 
+    /// <summary>Fills controls from a cloned result so Cancel leaves the live settings untouched.</summary>
     private void Populate()
     {
         Text = Localization.T("settings_title");
@@ -431,6 +438,7 @@ public sealed class SettingsForm : Form
         }
     }
 
+    /// <summary>Validates hotkeys and writes the edited controls back into Result, then closes with OK.</summary>
     private void Save()
     {
         _result.Language = SelectedValue(_languageCombo) ?? "en";

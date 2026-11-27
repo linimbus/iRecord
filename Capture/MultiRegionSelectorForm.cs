@@ -1,3 +1,5 @@
+// iRecord - multi-region screenshot picker.
+// Collects several screen rectangles (numbered) and merges them vertically into one image.
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using iRecord.App;
@@ -5,6 +7,9 @@ using iRecord.UI;
 
 namespace iRecord.Capture;
 
+/// <summary>
+/// Drag multiple regions, undo the last one with Backspace/Delete, confirm with Enter/Space.
+/// </summary>
 public sealed class MultiRegionSelectorForm : Form
 {
     private readonly Rectangle _virtualScreen;
@@ -43,6 +48,7 @@ public sealed class MultiRegionSelectorForm : Form
         }
     }
 
+    /// <summary>Clips the numbered regions to the virtual screen and merges them into one tall image.</summary>
     public Bitmap CreateMergedImage()
     {
         if (_background == null)

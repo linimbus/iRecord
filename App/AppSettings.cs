@@ -1,5 +1,10 @@
+// iRecord - persisted application settings model.
+// Serialized as JSON by SettingsStore; add new user options here and normalize them there.
 namespace iRecord.App;
 
+/// <summary>
+/// All user-configurable options. Values are plain strings/numbers so old settings files stay readable.
+/// </summary>
 public sealed class AppSettings
 {
     public string Language { get; set; } = string.Empty;
@@ -26,5 +31,6 @@ public sealed class AppSettings
     public string HotkeyScreenshotWindow { get; set; } = string.Empty;
     public string HotkeyScreenshotScroll { get; set; } = string.Empty;
 
+    /// <summary>Shallow copy used by the settings dialog for cancelable edits.</summary>
     public AppSettings Clone() => (AppSettings)MemberwiseClone();
 }

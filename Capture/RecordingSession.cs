@@ -1,3 +1,5 @@
+// iRecord - ScreenRecorderLib recording pipeline.
+// Owns capture sources, audio packets, pause/resume, red border rect, and output conversion.
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Drawing;
@@ -7,13 +9,23 @@ using ScreenRecorderLib;
 
 namespace iRecord.Capture;
 
+/// <summary>Capture target chosen before a recording starts.</summary>
 public enum CaptureMode
 {
+    /// <summary>A complete monitor (selected by the mouse or the multi-monitor picker).</summary>
     FullScreen,
+
+    /// <summary>A screen-space rectangle selected by the user.</summary>
     Region,
+
+    /// <summary>A top-level HWND; the session follows its position while recording.</summary>
     Window
 }
 
+/// <summary>
+/// One recording run. Captures fullscreen/region/window video and optional audio via ScreenRecorderLib,
+/// exposes live levels/elapsed time, then converts the temporary MP4 into the requested format.
+/// </summary>
 public sealed class RecordingSession : IDisposable
 {
     private static readonly object LogLock = new();
@@ -63,6 +75,7 @@ public sealed class RecordingSession : IDisposable
     private volatile bool _running;
     private volatile bool _paused;
 
+    // Public state is intentionally lightweight: the tray/control bar polls these values.
     public CaptureMode Mode { get; }
     public int Width { get; }
     public int Height { get; }
@@ -71,7 +84,10 @@ public sealed class RecordingSession : IDisposable
     public TimeSpan Elapsed => _clock.Elapsed;
     public string? LastError => _error;
 
+    /// <summary>True only when a real loopback source was added to the recorder.</summary>
     public bool HasSystemAudio => _hasSystemAudio;
+
+    /// <summary>True only when a real microphone source was added to the recorder.</summary>
     public bool HasMicAudio => _hasMicAudio;
     public float SystemAudioLevel => _systemLevel;
     public float MicAudioLevel => _micLevel;
@@ -127,6 +143,10 @@ public sealed class RecordingSession : IDisposable
         _currentCaptureRect = _captureRect;
     }
 
+    /// <summary>
+    /// Builds RecorderOptions, starts ScreenRecorderLib into a temporary MP4, and returns
+    /// false (with <see cref="LastError"/>) when source/audio/FFmpeg prerequisites fail.
+    /// </summary>
     public bool Start()
     {
         try
@@ -176,6 +196,7 @@ public sealed class RecordingSession : IDisposable
         }
     }
 
+    /// <summary>Maps application settings to ScreenRecorderLib options; null means a precondition failed.</summary>
     private RecorderOptions? BuildOptions()
     {
         if (string.Equals(NormalizeFormat(_settings.Format), "mp4", StringComparison.OrdinalIgnoreCase) == false &&
@@ -218,6 +239,10 @@ public sealed class RecordingSession : IDisposable
         return options;
     }
 
+    /// <summary>
+    /// Creates a display/window source. Region mode crops via SourceRect on the monitor
+    /// containing the rectangle, which keeps capture efficient.
+    /// </summary>
     private RecordingSourceBase? CreateRecordingSource(bool pointer)
     {
         if (Mode == CaptureMode.Window)
@@ -288,6 +313,10 @@ public sealed class RecordingSession : IDisposable
         return source;
     }
 
+    /// <summary>
+    /// Adds one optional loopback and one optional microphone source. Missing devices are
+    /// tolerated so video-only recording still succeeds; IDs are kept for live level metering.
+    /// </summary>
     private void ConfigureAudio(RecorderOptions options)
     {
         _hasSystemAudio = false;
@@ -376,6 +405,7 @@ public sealed class RecordingSession : IDisposable
         return (int)Math.Clamp(baseBitrate * scale, 1_000_000, 40_000_000);
     }
 
+    /// <summary>Our best available "recording actually started" signal; starts the elapsed clock once.</summary>
     private void OnFrameRecorded(object? sender, FrameRecordedEventArgs e)
     {
         if (Volatile.Read(ref _stopRequested) != 0 ||
@@ -473,6 +503,7 @@ public sealed class RecordingSession : IDisposable
         StateChanged?.Invoke();
     }
 
+    /// <summary>Computes per-source peaks from 48 kHz/16-bit stereo packet preview data.</summary>
     private void OnAudioPacketRecorded(object? sender, AudioDataRecordedEventArgs e)
     {
         if (_paused || e.AudioData == null)
@@ -505,6 +536,7 @@ public sealed class RecordingSession : IDisposable
         return Math.Min(1f, peak);
     }
 
+    /// <summary>Pauses/resumes both ScreenRecorderLib and the elapsed clock; output excludes paused time.</summary>
     public void TogglePause()
     {
         if (!_running || Volatile.Read(ref _stopRequested) != 0 || IsEncoding)
@@ -540,6 +572,7 @@ public sealed class RecordingSession : IDisposable
         RequestStop();
     }
 
+    /// <summary>Idempotently stops capture, hides the frame clock, and starts the async finalize/convert task.</summary>
     private void RequestStop()
     {
         if (Interlocked.Exchange(ref _stopRequested, 1) != 0)
@@ -565,6 +598,10 @@ public sealed class RecordingSession : IDisposable
         _ = Task.Run(FinishEncodingAsync);
     }
 
+    /// <summary>
+    /// Waits for ScreenRecorderLib to finalize the MP4, converts it to the requested format,
+    /// then raises Finished/Failed and always cleans the temp directory.
+    /// </summary>
     private async Task FinishEncodingAsync()
     {
         string? result = null;
@@ -657,6 +694,9 @@ public sealed class RecordingSession : IDisposable
 
     private static string ExtensionFor(string? format) => NormalizeFormat(format);
 
+    /// <summary>
+    /// MP4 is moved as-is; MKV/MOV are stream-copied by FFmpeg; WebM/GIF are transcoded.
+    /// </summary>
     private async Task<(bool Ok, string Output)> EncodeAsync(string source, string target)
     {
         string format = NormalizeFormat(_settings.Format);

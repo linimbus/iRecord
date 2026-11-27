@@ -1,7 +1,12 @@
+// iRecord - click-through recording border.
+// Tracks a provider rectangle, stays topmost, and is excluded from captures via WDA.
 using System.Drawing;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Transparent red frame around the active capture area. Used by both tray and headless recordings.
+/// </summary>
 public sealed class RecordingBorderForm : Form
 {
     private static readonly Color KeyColor = Color.FromArgb(255, 0, 255);
@@ -10,6 +15,10 @@ public sealed class RecordingBorderForm : Form
     private readonly Func<Rectangle> _rectProvider;
     private readonly System.Windows.Forms.Timer _timer;
 
+    /// <summary>
+    /// Creates a transparent, non-activating frame whose provider is polled every 50 ms.
+    /// Window display affinity is set on load so the frame never appears in recordings.
+    /// </summary>
     public RecordingBorderForm(Func<Rectangle> rectProvider)
     {
         _rectProvider = rectProvider;

@@ -1,11 +1,21 @@
+// iRecord - global hotkey parsing and registration.
+// HotkeyParser maps text/keyboard input to Win32 values; HotkeyWindow owns registrations.
 using System.Windows.Forms;
 
 namespace iRecord.App;
 
+/// <summary>
+/// A parsed global hotkey: Win32 modifier flags, virtual-key code, and display text.
+/// </summary>
 public readonly record struct Hotkey(uint Modifiers, uint Vk, string Text);
 
+/// <summary>
+/// Converts user-facing hotkey text ("Ctrl+Shift+F9") to Win32 modifiers/virtual-key values,
+/// and builds the canonical display text shown in Settings and tray menus.
+/// </summary>
 public static class HotkeyParser
 {
+    /// <summary>Parses a textual chord; returns false when no non-modifier key is present.</summary>
     public static bool TryParse(string? text, out Hotkey hotkey)
     {
         hotkey = default;
@@ -44,6 +54,7 @@ public static class HotkeyParser
         return true;
     }
 
+    /// <summary>Builds display text from a key event captured by HotkeyBox.</summary>
     public static string FromKeys(Keys key, Keys modifiers)
     {
         uint mods = 0;
@@ -130,11 +141,16 @@ public static class HotkeyParser
     }
 }
 
+/// <summary>
+/// Hidden native window that owns RegisterHotKey IDs and forwards WM_HOTKEY messages
+/// as action strings to TrayApplicationContext.
+/// </summary>
 public sealed class HotkeyWindow : NativeWindow, IDisposable
 {
     private readonly Dictionary<int, string> _actions = new();
     private int _nextId = 1;
 
+    /// <summary>Raised on the UI thread with the action name registered by the caller.</summary>
     public event Action<string>? Pressed;
 
     public HotkeyWindow()

@@ -1,7 +1,12 @@
+// iRecord - hotkey capture text box.
+// Converts the next key chord into canonical display text.
 using iRecord.App;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Read-only text box that records a key chord for SettingsForm.
+/// </summary>
 public sealed class HotkeyBox : TextBox
 {
     public HotkeyBox()
@@ -16,6 +21,7 @@ public sealed class HotkeyBox : TextBox
     protected override bool IsInputKey(Keys keyData)
         => (keyData & Keys.KeyCode) != Keys.Tab;
 
+    /// <summary>Captures the next chord; Backspace/Delete clears the assignment.</summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (e.KeyCode == Keys.Back || e.KeyCode == Keys.Delete)

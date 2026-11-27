@@ -1,7 +1,12 @@
+// iRecord - localization data and lookup helpers.
+// Keys must exist in every language dictionary; English is the fallback language.
 using System.Globalization;
 
 namespace iRecord.App;
 
+/// <summary>
+/// Static multi-language string catalog used by every UI form and notification.
+/// </summary>
 public static class Localization
 {
     private static readonly Dictionary<string, Dictionary<string, string>> Data = new(StringComparer.OrdinalIgnoreCase)
@@ -1131,6 +1136,7 @@ public static class Localization
     public static bool IsSupported(string? code) =>
         !string.IsNullOrWhiteSpace(code) && Data.ContainsKey(code);
 
+    /// <summary>Switches the active dictionary and notifies open windows.</summary>
     public static void SetLanguage(string? code)
     {
         if (!IsSupported(code)) return;
@@ -1139,6 +1145,7 @@ public static class Localization
         Changed?.Invoke();
     }
 
+    /// <summary>Returns the active-language string, then English, then the key itself.</summary>
     public static string T(string key)
     {
         if (Data.TryGetValue(Code, out var dict) && dict.TryGetValue(key, out var value))
@@ -1148,6 +1155,7 @@ public static class Localization
         return key;
     }
 
+    /// <summary>Formats a localized template; malformed templates fall back to raw text.</summary>
     public static string Format(string key, params object[] args)
     {
         try { return string.Format(T(key), args); }

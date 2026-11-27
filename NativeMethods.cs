@@ -1,10 +1,16 @@
+// iRecord - Win32 P/Invoke declarations.
+// Kept intentionally small; prefer managed WinForms APIs where available.
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace iRecord;
 
+/// <summary>
+/// Native constants, structs, and imports shared by capture, hotkeys, and window utilities.
+/// </summary>
 internal static class NativeMethods
 {
+    // Hotkey registration/modifiers.
     public const int WM_HOTKEY = 0x0312;
 
     public const uint MOD_ALT = 0x0001;
@@ -150,12 +156,14 @@ internal static class NativeMethods
     public const uint PW_RENDERFULLCONTENT = 0x2;
     public const uint MOUSEEVENTF_WHEEL = 0x0800;
 
+    // Keep the recording bar/border out of captures (Windows 10 2004+).
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint dwAffinity);
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
+    /// <summary>Filters DWM-cloaked windows that are not actually visible on a monitor.</summary>
     public static bool IsCloaked(IntPtr hWnd)
     {
         try
@@ -170,6 +178,7 @@ internal static class NativeMethods
         return false;
     }
 
+    /// <summary>Reads a window title without leaking an unmanaged buffer.</summary>
     public static string GetWindowTitle(IntPtr hWnd)
     {
         int len = GetWindowTextLength(hWnd);

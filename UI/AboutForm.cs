@@ -1,13 +1,19 @@
+// iRecord - about dialog.
+// Renders localized build/feature information and opens the official project page.
 using System.Diagnostics;
 using System.Drawing;
 using iRecord.App;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Simple about window with a website button and localized feature summary.
+/// </summary>
 public sealed class AboutForm : Form
 {
     private const string OfficialUrl = "https://github.com/linimbus/iRecordWindows";
 
+    /// <summary>Builds the localized about text and the official-site action.</summary>
     public AboutForm()
     {
         Text = Localization.T("about_title");

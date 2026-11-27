@@ -1,9 +1,14 @@
+// iRecord - single-region screenshot/recording picker.
+// Displays a virtual-desktop snapshot and returns one screen-space rectangle.
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using iRecord.App;
 
 namespace iRecord.Capture;
 
+/// <summary>
+/// Drag-to-select picker used by region screenshots and region recording.
+/// </summary>
 public sealed class RegionSelectorForm : Form
 {
     private readonly Rectangle _virtualScreen;
@@ -119,6 +124,7 @@ public sealed class RegionSelectorForm : Form
         Invalidate();
     }
 
+    /// <summary>Converts the form-local drag rectangle to virtual-screen coordinates.</summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left || !_dragging) return;

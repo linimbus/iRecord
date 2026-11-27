@@ -1,3 +1,5 @@
+// iRecord - headless command-line interface.
+// Parses record/list commands, drives RecordingSession, shows the red border, and returns JSON.
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
@@ -9,6 +11,10 @@ using iRecord.UI;
 
 namespace iRecord.Cli;
 
+/// <summary>
+/// Console-facing command dispatcher for recording, screen/window discovery, and help.
+/// Keep stdout clean when --json is used; all diagnostics belong on stderr.
+/// </summary>
 public static class CliRunner
 {
     private const int ExitOk = 0;
@@ -105,6 +111,7 @@ public static class CliRunner
         return ExitOk;
     }
 
+    /// <summary>Minimal option parser: flags plus single-value options, no positional arguments.</summary>
     private sealed class Options
     {
         private readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
@@ -167,6 +174,10 @@ public static class CliRunner
         public string? Get(string name) => _values.TryGetValue(name, out var value) ? value : null;
     }
 
+    /// <summary>
+    /// Runs a RecordingBorderForm on a dedicated STA message-loop thread so headless CLI
+    /// recording can show the same red capture frame as the tray UI.
+    /// </summary>
     private sealed class RecordingBorderHost : IDisposable
     {
         private readonly object _sync = new();
@@ -246,6 +257,10 @@ public static class CliRunner
         }
     }
 
+    /// <summary>
+    /// Headless record pipeline: parse/validate target, show the red border, wait for the real
+    /// recording start, honor --duration, then block until encoding completes.
+    /// </summary>
     private static int Record(string[] args)
     {
         var options = Options.Parse(args,
@@ -328,6 +343,7 @@ public static class CliRunner
                     return FailRecord(json, resultFile, "Cancelled before recording started.");
             }
 
+            // Start the border before capture so WDA_EXCLUDEFROMCAPTURE is applied before the first frame.
             using var session = new RecordingSession(settings, mode, rect, windowHandle);
             using var border = new RecordingBorderHost();
             border.Start(() => session.CurrentCaptureRect);
@@ -347,6 +363,7 @@ public static class CliRunner
                     $"mouse={settings.MouseMode} duration={(duration > 0 ? duration.ToString("0.#", CultureInfo.InvariantCulture) + "s" : "until Ctrl+C")}");
             }
 
+            // Duration starts only after the recorder reports its first real frame.
             if (duration > 0)
             {
                 int startSignal = WaitHandle.WaitAny(
@@ -449,6 +466,7 @@ public static class CliRunner
         }
     }
 
+    /// <summary>Converts CLI mode/region/window/screen options into a RecordingSession target.</summary>
     private static (CaptureMode Mode, Rectangle Rect, IntPtr Window, string Name) ResolveTarget(Options options)
     {
         string modeName = (options.Get("mode") ?? "fullscreen").Trim().ToLowerInvariant();

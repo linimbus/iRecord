@@ -1,3 +1,5 @@
+// iRecord - screen/window capture and scrolling-stitch algorithms.
+// Handles PrintWindow fallback, multi-region merge, and signature-based scroll detection.
 using System.Buffers;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -5,10 +7,14 @@ using System.Runtime.InteropServices;
 
 namespace iRecord.Capture;
 
+/// <summary>
+/// Stateless screenshot helpers: rectangle/window capture, merged multi-regions, and long scrolling windows.
+/// </summary>
 public static class ScreenshotService
 {
     private const int SignatureSegments = 8;
 
+    /// <summary>Returns a window's client area in virtual-screen coordinates.</summary>
     public static Rectangle GetClientRectOnScreen(IntPtr hwnd)
     {
         if (!NativeMethods.GetClientRect(hwnd, out var rect))
@@ -21,6 +27,7 @@ public static class ScreenshotService
         return new Rectangle(point.X, point.Y, rect.Width, rect.Height);
     }
 
+    /// <summary>Copies one screen rectangle through BitBlt/GDI.</summary>
     public static Bitmap CaptureRect(Rectangle rect)
     {
         if (rect.Width <= 0 || rect.Height <= 0)
@@ -40,6 +47,10 @@ public static class ScreenshotService
         }
     }
 
+    /// <summary>
+    /// Prefers PrintWindow (works for occluded windows); falls back to a screen copy
+    /// when PrintWindow returns a blank bitmap.
+    /// </summary>
     public static Bitmap CaptureWindow(IntPtr hwnd, Rectangle windowRect)
     {
         if (windowRect.Width <= 0 || windowRect.Height <= 0)
@@ -74,6 +85,7 @@ public static class ScreenshotService
         return CaptureRect(windowRect);
     }
 
+    /// <summary>Vertically stacks clipped region crops with an optional gutter and centered widths.</summary>
     public static Bitmap MergeRegions(Bitmap source, IReadOnlyList<Rectangle> regions, int gutter)
     {
         var sourceRect = new Rectangle(0, 0, source.Width, source.Height);
@@ -111,6 +123,11 @@ public static class ScreenshotService
         return result;
     }
 
+    /// <summary>
+    /// Captures a window while scrolling it with the mouse wheel, detects vertical overlap
+    /// from row signatures, and stitches new content until reaching the bottom.
+    /// Restores the original scroll position and cursor afterwards.
+    /// </summary>
     public static Bitmap CaptureScrollingWindow(IntPtr hwnd)
     {
         var client = GetClientRectOnScreen(hwnd);

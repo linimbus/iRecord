@@ -1,13 +1,19 @@
+// iRecord - OCR result dialog.
+// Shows recognized text with copy/close actions and an empty-result message.
 using System.Drawing;
 using iRecord.App;
 
 namespace iRecord.UI;
 
+/// <summary>
+/// Read-only result window for OCR output.
+/// </summary>
 public sealed class OcrResultForm : Form
 {
     private readonly TextBox _textBox;
     private readonly Label _status;
 
+    /// <summary>Displays read-only OCR text with copy/close actions.</summary>
     public OcrResultForm(string text)
     {
         Text = Localization.T("editor_ocr_title");

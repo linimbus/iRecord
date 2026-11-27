@@ -144,6 +144,8 @@ iRecord-cli.exe record --mode window --window notepad --duration 10 --format web
 
 ## 项目结构
 
+更详细的目录、源文件职责和 AI 增量开发指南见 [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)。
+
 ```
 Program.cs                     入口（托盘模式 / CLI 模式）
 App/                           托盘、设置、本地化、快捷键、配置持久化

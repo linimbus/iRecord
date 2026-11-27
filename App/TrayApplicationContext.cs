@@ -1,3 +1,5 @@
+// iRecord - application coordinator and tray UI.
+// Owns the tray icon/menu, hotkeys, recording sessions, screenshot flows, and editor lifetimes.
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -6,6 +8,10 @@ using iRecord.UI;
 
 namespace iRecord.App;
 
+/// <summary>
+/// Central WinForms application context for the tray-resident mode.
+/// It marshals worker events back to the UI thread and coordinates all feature entry points.
+/// </summary>
 public sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly Control _dispatcher = new();
@@ -358,6 +364,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    /// <summary>
+    /// Resolves the target (region/window picker or monitor), starts a RecordingSession,
+    /// then owns the control bar, red border, tray icon, and menu state for its lifetime.
+    /// </summary>
     private void StartRecordingCore(CaptureMode mode)
     {
         if (NeedsFfmpeg(_settings.Format) && FfmpegTools.Resolve(_settings.FfmpegPath) == null)
@@ -368,6 +378,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
+        // Single monitor starts immediately; multi-monitor fullscreen shows a red selection frame.
         bool selectScreen = mode == CaptureMode.FullScreen && Screen.AllScreens.Length > 1;
         _panelShouldReturn = _panel?.Visible == true;
         bool panelHiddenForPicker = false;
@@ -639,6 +650,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _panel.TopMost = true;
     }
 
+    /// <summary>Shows the region picker, captures, saves to disk, copies to clipboard, and opens the editor.</summary>
     private void CaptureSingleRegionScreenshot()
     {
         if (_session != null || _capturingScreenshot) return;
@@ -781,6 +793,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    /// <summary>Automates wheel scrolling inside a selected window and stitches the result into a long PNG.</summary>
     private void CaptureScrollingScreenshot()
     {
         if (_session != null || _capturingScreenshot) return;
@@ -843,6 +856,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         Thread.Sleep(220);
     }
 
+    /// <summary>Persists a capture and immediately places the same bitmap on the clipboard.</summary>
     private void SaveScreenshot(Bitmap bitmap, string suffix)
     {
         string folder = _settings.OutputFolder;
@@ -856,6 +870,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             Localization.Format("screenshot_saved_text", path), ToolTipIcon.Info);
     }
 
+    /// <summary>Opens the annotation editor and keeps it above the panel until closed.</summary>
     private void ShowImageEditor(Bitmap image, string path)
     {
         var editor = new ImageEditorForm(image, path);
