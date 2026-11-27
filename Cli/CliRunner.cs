@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using iRecord.App;
 using iRecord.Capture;
+using iRecord.UI;
 
 namespace iRecord.Cli;
 
@@ -166,6 +167,85 @@ public static class CliRunner
         public string? Get(string name) => _values.TryGetValue(name, out var value) ? value : null;
     }
 
+    private sealed class RecordingBorderHost : IDisposable
+    {
+        private readonly object _sync = new();
+        private readonly ManualResetEventSlim _ready = new(false);
+        private Thread? _thread;
+        private RecordingBorderForm? _form;
+        private bool _disposed;
+
+        public void Start(Func<Rectangle> rectProvider)
+        {
+            _thread = new Thread(() =>
+            {
+                RecordingBorderForm? form = null;
+                try
+                {
+                    form = new RecordingBorderForm(rectProvider);
+                    form.Shown += (_, _) =>
+                    {
+                        try { _ready.Set(); } catch { }
+                    };
+
+                    lock (_sync)
+                    {
+                        if (_disposed)
+                        {
+                            form.Dispose();
+                            return;
+                        }
+
+                        _form = form;
+                    }
+
+                    Application.Run(form);
+                }
+                catch
+                {
+                    _ready.Set();
+                }
+                finally
+                {
+                    try { form?.Dispose(); } catch { }
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "iRecord.Border"
+            };
+
+            _thread.SetApartmentState(ApartmentState.STA);
+            _thread.Start();
+            _ready.Wait(TimeSpan.FromSeconds(2));
+        }
+
+        public void Dispose()
+        {
+            RecordingBorderForm? form;
+            lock (_sync)
+            {
+                if (_disposed)
+                    return;
+
+                _disposed = true;
+                form = _form;
+            }
+
+            if (form != null)
+            {
+                try { form.BeginInvoke(new Action(() => form.Close())); }
+                catch
+                {
+                    try { form.Close(); } catch { }
+                }
+            }
+
+            try { _thread?.Join(1800); } catch { }
+            try { _ready.Dispose(); } catch { }
+        }
+    }
+
     private static int Record(string[] args)
     {
         var options = Options.Parse(args,
@@ -222,7 +302,8 @@ public static class CliRunner
         if (rect.Width < 8 || rect.Height < 8)
             return FailRecord(json, resultFile, "The selected capture area is too small.");
 
-        if (FfmpegTools.Resolve(settings.FfmpegPath) == null)
+        bool needsFfmpeg = !string.Equals(settings.Format, "mp4", StringComparison.OrdinalIgnoreCase);
+        if (needsFfmpeg && FfmpegTools.Resolve(settings.FfmpegPath) == null)
             return FailRecord(json, resultFile,
                 "FFmpeg was not found. Place ffmpeg.exe next to iRecord.exe or configure it in Settings.");
 
@@ -248,6 +329,11 @@ public static class CliRunner
             }
 
             using var session = new RecordingSession(settings, mode, rect, windowHandle);
+            using var border = new RecordingBorderHost();
+            border.Start(() => session.CurrentCaptureRect);
+
+            using var recordingStarted = new ManualResetEventSlim(false);
+            session.Started += () => recordingStarted.Set();
             session.Finished += p => { path = p; done.Set(); };
             session.Failed += e => { error = e; done.Set(); };
 
@@ -259,6 +345,19 @@ public static class CliRunner
                 Log($"[record] started mode={modeName} {session.Width}x{session.Height} " +
                     $"format={settings.Format} fps={settings.Fps} audio={settings.Audio} " +
                     $"mouse={settings.MouseMode} duration={(duration > 0 ? duration.ToString("0.#", CultureInfo.InvariantCulture) + "s" : "until Ctrl+C")}");
+            }
+
+            if (duration > 0)
+            {
+                int startSignal = WaitHandle.WaitAny(
+                    new[] { stopSignal.WaitHandle, recordingStarted.WaitHandle, done.WaitHandle },
+                    TimeSpan.FromSeconds(15));
+
+                if (startSignal == 0 && !recordingStarted.IsSet)
+                    return FailRecord(json, resultFile, "Cancelled before recording started.");
+
+                if (startSignal == WaitHandle.WaitTimeout && !quiet)
+                    Log("[record] warning: recording start timed out, starting duration timer.");
             }
 
             using var timer = duration > 0
@@ -285,13 +384,18 @@ public static class CliRunner
             }
 
             int signal = WaitHandle.WaitAny(new[] { stopSignal.WaitHandle, done.WaitHandle });
+            bool stopping = signal == 0 && !done.IsSet;
 
-            if (signal == 0 && !done.IsSet)
+            if (stopping)
             {
                 if (!quiet) Log("[record] stopping and encoding...");
                 session.Stop();
-                done.Wait(TimeSpan.FromMinutes(30));
             }
+
+            border.Dispose();
+
+            if (stopping)
+                done.Wait(TimeSpan.FromMinutes(30));
 
             progressStop.Set();
             if (progress != null) progress.Join(1500);
@@ -651,9 +755,9 @@ OUTPUT
 
 FOR LLM AGENTS
   Use iRecord-cli.exe: it is a console application, so shells and process runners wait for it
-  and receive its exit code. iRecord.exe never opens a window in CLI mode, but Windows shells
-  may not wait for GUI-subsystem programs.
-  iRecord-cli.exe is a non-interactive screen recorder.
+  and receive its exit code. iRecord.exe opens only the red recording border in CLI mode, but
+  Windows shells may not wait for GUI-subsystem programs.
+  A red border marks the actual capture area during full screen, region and window recording.
   Recommended flow:
     1. iRecord-cli.exe list-screens
        -> [{"index":0,"primary":true,"x":0,"y":0,"width":1920,"height":1080,"device":"\\\\.\\DISPLAY1"}]

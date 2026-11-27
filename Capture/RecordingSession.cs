@@ -1,8 +1,9 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
+using System.Windows.Forms;
 using iRecord.App;
+using ScreenRecorderLib;
 
 namespace iRecord.Capture;
 
@@ -34,33 +35,33 @@ public sealed class RecordingSession : IDisposable
     private readonly string _ffmpeg;
     private readonly int _fps;
 
-    private Thread? _thread;
-    private Process? _videoProcess;
-    private Stream? _videoStdin;
-    private AudioRecorder? _audio;
+    private Recorder? _recorder;
+    private TaskCompletionSource<string?>? _recordingCompletion;
+    private CaptureAudioSource? _micSource;
+    private CancellationTokenSource? _windowWatch;
     private readonly Stopwatch _clock = new();
-    private readonly ManualResetEventSlim _pauseReached = new(false);
-    private string? _ffmpegStderr;
-    private string? _tempDir;
-    private string? _tempVideo;
-    private string? _currentVideoPath;
-    private readonly List<string> _videoSegments = new();
-    private int _segmentIndex;
-    private int _segmentFrames;
-    private string? _systemAudioPath;
-    private string? _micAudioPath;
-    private long _systemAudioBytes;
-    private long _micAudioBytes;
-    private int _frameCount;
-    private int _finalized;
-
     private readonly object _rectLock = new();
-    private Rectangle _currentCaptureRect;
-    private int _micVolumePercent = 100;
 
+    private string? _tempDir;
+    private string? _recordingPath;
+    private string? _systemAudioId;
+    private string? _micAudioId;
+    private string? _error;
+    private int _stopRequested;
+    private int _disposed;
+    private int _started;
+    private bool _clockStarted;
+    private bool _hasSystemAudio;
+    private bool _hasMicAudio;
+    private int _recordWidth;
+    private int _recordHeight;
+    private int _micVolumePercent;
+    private float _systemLevel;
+    private float _micLevel;
+
+    private Rectangle _currentCaptureRect;
     private volatile bool _running;
     private volatile bool _paused;
-    private string? _error;
 
     public CaptureMode Mode { get; }
     public int Width { get; }
@@ -70,10 +71,10 @@ public sealed class RecordingSession : IDisposable
     public TimeSpan Elapsed => _clock.Elapsed;
     public string? LastError => _error;
 
-    public bool HasSystemAudio => _settings.Audio is "system" or "both";
-    public bool HasMicAudio => _settings.Audio is "mic" or "both";
-    public float SystemAudioLevel => _audio?.SystemLevel ?? 0f;
-    public float MicAudioLevel => _audio?.MicLevel ?? 0f;
+    public bool HasSystemAudio => _hasSystemAudio;
+    public bool HasMicAudio => _hasMicAudio;
+    public float SystemAudioLevel => _systemLevel;
+    public float MicAudioLevel => _micLevel;
     public int MicVolumePercent => _micVolumePercent;
 
     public Rectangle CurrentCaptureRect
@@ -88,11 +89,25 @@ public sealed class RecordingSession : IDisposable
     public void SetMicVolume(int percent)
     {
         _micVolumePercent = Math.Clamp(percent, 0, 200);
-        _audio?.SetMicGain(_micVolumePercent / 100f);
+
+        if (_micSource == null)
+            return;
+
+        try
+        {
+            _micSource.Volume = _micVolumePercent / 100f;
+            _recorder?.GetDynamicOptionsBuilder()
+                .SetUpdatedAudioSource(_micSource)
+                .Apply();
+        }
+        catch
+        {
+        }
     }
 
     public event Action<string>? Finished;
     public event Action<string>? Failed;
+    public event Action? Started;
     public event Action? StateChanged;
 
     public RecordingSession(AppSettings settings, CaptureMode mode, Rectangle rect, IntPtr windowHandle)
@@ -103,14 +118,13 @@ public sealed class RecordingSession : IDisposable
 
         Width = Math.Max(2, rect.Width & ~1);
         Height = Math.Max(2, rect.Height & ~1);
+        _recordWidth = Width;
+        _recordHeight = Height;
         _captureRect = new Rectangle(rect.X, rect.Y, Width, Height);
         _fps = Math.Clamp(settings.Fps, 5, 60);
         _ffmpeg = FfmpegTools.Resolve(settings.FfmpegPath) ?? "ffmpeg.exe";
         _micVolumePercent = Math.Clamp(settings.MicVolume, 0, 200);
         _currentCaptureRect = _captureRect;
-
-        _clock.Restart();
-        _clock.Stop();
     }
 
     public bool Start()
@@ -120,275 +134,402 @@ public sealed class RecordingSession : IDisposable
             _tempDir = Path.Combine(Path.GetTempPath(), "iRecord", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_tempDir);
 
-            if (!StartVideoSegment())
-                return false;
-
-            if (_settings.Audio is not "none")
+            var options = BuildOptions();
+            if (options == null)
             {
-                _audio = new AudioRecorder();
-                _audio.SetMicGain(_micVolumePercent / 100f);
-                _audio.Start(_tempDir, _settings.Audio);
+                CleanupTemp();
+                return false;
             }
 
+            _recordingPath = Path.Combine(_tempDir, "recording.mp4");
+            _recordingCompletion = new TaskCompletionSource<string?>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _recorder = Recorder.CreateRecorder(options);
+            _recorder.OnRecordingComplete += OnRecordingComplete;
+            _recorder.OnRecordingFailed += OnRecordingFailed;
+            _recorder.OnStatusChanged += OnStatusChanged;
+            _recorder.OnFrameRecorded += OnFrameRecorded;
+            _recorder.OnAudioPacketRecorded += OnAudioPacketRecorded;
+
             _running = true;
-            _clock.Restart();
-            Diag($"Start mode={Mode} {Width}x{Height} fps={_fps} ffmpeg={_ffmpeg} audio={_settings.Audio} mouse={_settings.MouseMode} format={_settings.Format}");
-            _thread = new Thread(CaptureLoop)
-            {
-                IsBackground = true,
-                Name = "iRecord.Capture",
-                Priority = ThreadPriority.AboveNormal
-            };
-            _thread.Start();
+            _recorder.Record(_recordingPath);
+
+            if (Mode == CaptureMode.Window)
+                StartWindowWatcher();
+
+            Diag($"Start mode={Mode} {_recordWidth}x{_recordHeight} fps={_fps} " +
+                 $"source={(_recorder != null ? "screenrecorderlib" : "none")} " +
+                 $"audio={_settings.Audio} system={_hasSystemAudio} mic={_hasMicAudio} " +
+                 $"mouse={_settings.MouseMode} format={_settings.Format} ffmpeg={_ffmpeg}");
             StateChanged?.Invoke();
             return true;
         }
         catch (Exception ex)
         {
             _error = Localization.Format("error_capture", ex.Message);
+            _running = false;
+            try { _recorder?.Dispose(); } catch { }
+            _recorder = null;
             CleanupTemp();
             return false;
         }
     }
 
-    private bool StartVideoSegment()
+    private RecorderOptions? BuildOptions()
     {
-        if (_tempDir == null)
-            return false;
-
-        string crf = _settings.Quality switch
-        {
-            "low" => "28",
-            "medium" => "23",
-            _ => "18"
-        };
-
-        string segmentPath = Path.Combine(_tempDir, $"video_{_segmentIndex:000}.mp4");
-        _segmentIndex++;
-
-        var args = new List<string>
-        {
-            "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "rawvideo",
-            "-pixel_format", "bgra",
-            "-video_size", $"{Width}x{Height}",
-            "-framerate", _fps.ToString(),
-            "-use_wallclock_as_timestamps", "1",
-            "-i", "pipe:0",
-            "-an",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", crf,
-            "-pix_fmt", "yuv420p",
-            "-fps_mode", "vfr",
-            "-movflags", "+faststart",
-            segmentPath
-        };
-
-        var psi = FfmpegTools.CreateStartInfo(_ffmpeg, args, redirectStdin: true, redirectStderr: true);
-        var process = new Process { StartInfo = psi };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (!string.IsNullOrWhiteSpace(e.Data))
-                _ffmpegStderr = e.Data;
-        };
-
-        if (!process.Start())
+        if (string.Equals(NormalizeFormat(_settings.Format), "mp4", StringComparison.OrdinalIgnoreCase) == false &&
+            FfmpegTools.Resolve(_settings.FfmpegPath) == null)
         {
             _error = Localization.T("notify_ffmpeg_missing");
-            return false;
+            return null;
         }
 
-        process.BeginErrorReadLine();
-        _videoProcess = process;
-        _videoStdin = process.StandardInput.BaseStream;
-        _currentVideoPath = segmentPath;
-        _segmentFrames = 0;
-        Diag($"ffmpeg started pid={process.Id} segment={segmentPath}");
-        return true;
+        var options = RecorderOptions.Default;
+
+        options.OutputOptions.RecorderMode = RecorderMode.Video;
+        options.OutputOptions.Stretch = StretchMode.Fill;
+        options.VideoEncoderOptions.Framerate = _fps;
+        options.VideoEncoderOptions.IsFixedFramerate = true;
+        options.VideoEncoderOptions.Bitrate = CalculateVideoBitrate();
+        options.VideoEncoderOptions.IsHardwareEncodingEnabled = true;
+        options.VideoEncoderOptions.IsMp4FastStartEnabled = true;
+        options.VideoEncoderOptions.IsFragmentedMp4Enabled = false;
+
+        bool pointer = !string.Equals(_settings.MouseMode, "off", StringComparison.OrdinalIgnoreCase);
+        bool clicks = string.Equals(_settings.MouseMode, "clicks", StringComparison.OrdinalIgnoreCase);
+
+        options.MouseOptions.IsMousePointerEnabled = pointer;
+        options.MouseOptions.IsMouseClicksDetected = clicks;
+        options.MouseOptions.MouseClickDetectionMode = MouseDetectionMode.Hook;
+        options.MouseOptions.MouseClickDetectionDuration = 420;
+        options.MouseOptions.MouseClickDetectionRadius = 26;
+        options.MouseOptions.MouseLeftClickDetectionColor = "#FF5252";
+        options.MouseOptions.MouseRightClickDetectionColor = "#5296FF";
+
+        var source = CreateRecordingSource(pointer);
+        if (source == null)
+            return null;
+
+        options.SourceOptions.RecordingSources = new List<RecordingSourceBase> { source };
+        options.OutputOptions.OutputFrameSize = new ScreenSize(_recordWidth, _recordHeight);
+
+        ConfigureAudio(options);
+        return options;
     }
 
-    private void CaptureLoop()
+    private RecordingSourceBase? CreateRecordingSource(bool pointer)
     {
-        var frameInterval = 1000.0 / _fps;
-        using var bitmap = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
-        using var graphics = Graphics.FromImage(bitmap);
-        var overlay = new MouseOverlay(_settings.MouseMode);
-        var buffer = new byte[Width * Height * 4];
-        var sw = new Stopwatch();
-
-        try
+        if (Mode == CaptureMode.Window)
         {
-            while (_running)
+            if (_windowHandle == IntPtr.Zero || !NativeMethods.IsWindow(_windowHandle))
             {
-                if (_paused)
+                _error = Localization.T("error_window_closed");
+                return null;
+            }
+
+            return new WindowRecordingSource(_windowHandle)
+            {
+                IsCursorCaptureEnabled = pointer,
+                IsBorderRequired = false,
+                Stretch = StretchMode.Fill,
+                OutputSize = new ScreenSize(_recordWidth, _recordHeight)
+            };
+        }
+
+        var screen = Screen.FromRectangle(_captureRect) ?? Screen.PrimaryScreen;
+        if (screen == null)
+        {
+            _error = Localization.Format("error_capture", "no display available");
+            return null;
+        }
+
+        var displays = Recorder.GetDisplays();
+        var display = displays.FirstOrDefault(d =>
+                          string.Equals(d.DeviceName, screen.DeviceName, StringComparison.OrdinalIgnoreCase))
+                      ?? displays.FirstOrDefault();
+
+        if (display == null)
+        {
+            _error = Localization.Format("error_capture", "no display available");
+            return null;
+        }
+
+        var source = new DisplayRecordingSource(display.DeviceName)
+        {
+            IsCursorCaptureEnabled = pointer,
+            IsBorderRequired = false,
+            Stretch = StretchMode.Fill,
+            OutputSize = new ScreenSize(_recordWidth, _recordHeight)
+        };
+
+        if (Mode == CaptureMode.Region)
+        {
+            var bounds = screen.Bounds;
+            int left = Math.Max(0, _captureRect.Left - bounds.Left);
+            int top = Math.Max(0, _captureRect.Top - bounds.Top);
+            int right = Math.Min(bounds.Width, _captureRect.Right - bounds.Left);
+            int bottom = Math.Min(bounds.Height, _captureRect.Bottom - bounds.Top);
+            int width = (right - left) & ~1;
+            int height = (bottom - top) & ~1;
+
+            if (width < 2 || height < 2)
+            {
+                _error = Localization.Format("error_capture", "region is outside the display");
+                return null;
+            }
+
+            _recordWidth = width;
+            _recordHeight = height;
+            source.SourceRect = new ScreenRect(left, top, width, height);
+            source.OutputSize = new ScreenSize(width, height);
+        }
+
+        return source;
+    }
+
+    private void ConfigureAudio(RecorderOptions options)
+    {
+        _hasSystemAudio = false;
+        _hasMicAudio = false;
+        _systemAudioId = null;
+        _micAudioId = null;
+        _micSource = null;
+
+        var sources = new List<AudioSourceBase>();
+
+        if (_settings.Audio is "system" or "both")
+        {
+            try
+            {
+                var device = Recorder.GetSystemAudioLoopbackDevices()
+                    .FirstOrDefault(d => d.IsDefaultDevice)
+                    ?? Recorder.GetSystemAudioLoopbackDevices().FirstOrDefault();
+
+                if (device != null && !string.IsNullOrWhiteSpace(device.DeviceName))
                 {
-                    _pauseReached.Set();
-                    Thread.Sleep(20);
-                    continue;
+                    var source = new LoopbackAudioSource { DeviceName = device.DeviceName };
+                    sources.Add(source);
+                    _systemAudioId = source.ID;
+                    _hasSystemAudio = true;
                 }
+            }
+            catch (Exception ex)
+            {
+                Diag("system audio unavailable: " + ex.Message);
+            }
+        }
 
-                _pauseReached.Reset();
+        if (_settings.Audio is "mic" or "both")
+        {
+            try
+            {
+                var device = Recorder.GetSystemAudioCaptureDevices()
+                    .FirstOrDefault(d => d.IsDefaultDevice)
+                    ?? Recorder.GetSystemAudioCaptureDevices().FirstOrDefault();
 
-                Rectangle sourceRect;
-                bool minimized = false;
+                if (device != null && !string.IsNullOrWhiteSpace(device.DeviceName))
+                {
+                    var source = new CaptureAudioSource
+                    {
+                        DeviceName = device.DeviceName,
+                        Volume = _micVolumePercent / 100f
+                    };
+                    sources.Add(source);
+                    _micSource = source;
+                    _micAudioId = source.ID;
+                    _hasMicAudio = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Diag("microphone unavailable: " + ex.Message);
+            }
+        }
 
-                if (Mode == CaptureMode.Window)
+        if (sources.Count == 0)
+        {
+            options.AudioOptions.IsAudioEnabled = false;
+            options.AudioOptions.AudioSources = new List<AudioSourceBase>();
+            return;
+        }
+
+        options.AudioOptions.AudioSources = sources;
+        options.AudioOptions.IsAudioEnabled = true;
+        options.AudioOptions.IsAudioPacketPreviewEnabled = true;
+        options.AudioOptions.Bitrate = AudioBitrate.bitrate_192kbps;
+        options.AudioOptions.Channels = AudioChannels.Stereo;
+    }
+
+    private int CalculateVideoBitrate()
+    {
+        int baseBitrate = _settings.Quality switch
+        {
+            "low" => 2_000_000,
+            "medium" => 4_500_000,
+            _ => 8_000_000
+        };
+
+        double pixelScale = (_recordWidth * (double)_recordHeight) / (1920.0 * 1080.0);
+        double fpsScale = _fps / 30.0;
+        double scale = Math.Clamp(pixelScale, 0.4, 2.0) * Math.Clamp(fpsScale, 0.5, 2.0);
+        return (int)Math.Clamp(baseBitrate * scale, 1_000_000, 40_000_000);
+    }
+
+    private void OnFrameRecorded(object? sender, FrameRecordedEventArgs e)
+    {
+        if (Volatile.Read(ref _stopRequested) != 0 ||
+            Interlocked.Exchange(ref _started, 1) != 0)
+            return;
+
+        _clockStarted = true;
+        if (!_paused)
+            _clock.Start();
+
+        Diag($"first frame={e.FrameNumber} timestamp={e.Timestamp}");
+        Started?.Invoke();
+    }
+
+    private void MarkStarted()
+    {
+        if (Volatile.Read(ref _stopRequested) != 0 ||
+            Interlocked.Exchange(ref _started, 1) != 0)
+            return;
+
+        _clockStarted = true;
+        if (!_paused)
+            _clock.Start();
+
+        Started?.Invoke();
+    }
+
+    private void StartWindowWatcher()
+    {
+        var cts = new CancellationTokenSource();
+        _windowWatch = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
                 {
                     if (!NativeMethods.IsWindow(_windowHandle))
                     {
-                        _error = Localization.T("error_window_closed");
+                        _error ??= Localization.T("error_window_closed");
+                        RequestStop();
                         break;
                     }
 
-                    minimized = NativeMethods.IsIconic(_windowHandle);
-                    if (minimized)
+                    if (!NativeMethods.IsIconic(_windowHandle) &&
+                        NativeMethods.GetWindowRect(_windowHandle, out var wr))
                     {
-                        sourceRect = _captureRect;
+                        lock (_rectLock)
+                            _currentCaptureRect = new Rectangle(wr.Left, wr.Top, Width, Height);
                     }
-                    else
-                    {
-                        NativeMethods.GetWindowRect(_windowHandle, out var wr);
-                        sourceRect = new Rectangle(wr.Left, wr.Top, Width, Height);
-                    }
-                }
-                else
-                {
-                    sourceRect = _captureRect;
-                }
 
-                lock (_rectLock)
-                    _currentCaptureRect = sourceRect;
-
-                sw.Restart();
-
-                try
-                {
-                    if (minimized)
-                    {
-                        graphics.Clear(Color.Black);
-                    }
-                    else
-                    {
-                        graphics.CopyFromScreen(sourceRect.X, sourceRect.Y, 0, 0,
-                            new Size(Width, Height), CopyPixelOperation.SourceCopy);
-                        if (overlay.Enabled)
-                            overlay.Draw(graphics, sourceRect);
-                    }
+                    await Task.Delay(200, cts.Token).ConfigureAwait(false);
                 }
-                catch (Exception ex)
-                {
-                    _error = Localization.Format("error_capture", ex.Message);
-                    break;
-                }
-
-                try
-                {
-                    var data = bitmap.LockBits(new Rectangle(0, 0, Width, Height),
-                        ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-                    try
-                    {
-                        if (data.Stride == Width * 4)
-                        {
-                            Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
-                        }
-                        else
-                        {
-                            for (int y = 0; y < Height; y++)
-                            {
-                                IntPtr row = IntPtr.Add(data.Scan0, y * data.Stride);
-                                Marshal.Copy(row, buffer, y * Width * 4, Width * 4);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        bitmap.UnlockBits(data);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _error = Localization.Format("error_capture", ex.Message);
-                    break;
-                }
-
-                try
-                {
-                    _videoStdin!.Write(buffer, 0, buffer.Length);
-                    _videoStdin.Flush();
-                    _frameCount++;
-                    _segmentFrames++;
-                    if (_frameCount == 1 || _frameCount % 30 == 0)
-                        Diag($"frame {_frameCount} rect={sourceRect}");
-                }
-                catch (Exception ex)
-                {
-                    _error = Localization.Format("error_encode",
-                        string.IsNullOrWhiteSpace(_ffmpegStderr) ? "ffmpeg pipe closed" : _ffmpegStderr!);
-                    Diag("pipe write failed: " + ex + " stderr=" + _ffmpegStderr);
-                    break;
-                }
-
-                double spent = sw.Elapsed.TotalMilliseconds;
-                double delay = frameInterval - spent;
-                if (delay > 1)
-                    Thread.Sleep((int)delay);
             }
-        }
-        catch (Exception ex)
-        {
-            if (_error == null)
-                _error = Localization.Format("error_capture", ex.Message);
-        }
-        finally
-        {
-            if (_error != null)
+            catch (OperationCanceledException)
             {
-                _running = false;
-                _clock.Stop();
-                ThreadPool.QueueUserWorkItem(_ => FinalizeAbort());
             }
+            catch (Exception ex)
+            {
+                Diag("window watcher failed: " + ex);
+            }
+        });
+    }
+
+    private void OnRecordingComplete(object? sender, RecordingCompleteEventArgs e)
+    {
+        Diag($"recorder complete path={e.FilePath} len={(File.Exists(e.FilePath) ? new FileInfo(e.FilePath).Length : 0)}");
+        _recordingCompletion?.TrySetResult(e.FilePath);
+    }
+
+    private void OnRecordingFailed(object? sender, RecordingFailedEventArgs e)
+    {
+        _error ??= Localization.Format("error_capture", e.Error);
+        Diag("recorder failed: " + e.Error);
+        _recordingCompletion?.TrySetResult(null);
+        RequestStop();
+    }
+
+    private void OnStatusChanged(object? sender, RecordingStatusEventArgs e)
+    {
+        Diag("recorder status=" + e.Status);
+
+        if (e.Status == RecorderStatus.Recording)
+        {
+            MarkStarted();
+            if (_clockStarted && !_paused && !_clock.IsRunning)
+                _clock.Start();
+        }
+        else if (e.Status is RecorderStatus.Paused or RecorderStatus.Finishing or RecorderStatus.Idle)
+        {
+            _clock.Stop();
+        }
+
+        StateChanged?.Invoke();
+    }
+
+    private void OnAudioPacketRecorded(object? sender, AudioDataRecordedEventArgs e)
+    {
+        if (_paused || e.AudioData == null)
+            return;
+
+        foreach (var packet in e.AudioData.Sources)
+        {
+            if (packet.Data == null || packet.Data.Length < 2)
+                continue;
+
+            float peak = ComputePeak(packet.Data);
+            if (packet.Id == _systemAudioId)
+                _systemLevel = Math.Max(peak, _systemLevel * 0.75f);
+            else if (packet.Id == _micAudioId)
+                _micLevel = Math.Max(peak, _micLevel * 0.75f);
         }
     }
 
-    private void FinalizeAbort()
+    private static float ComputePeak(byte[] data)
     {
-        if (Interlocked.Exchange(ref _finalized, 1) != 0) return;
-        string message = _error ?? Localization.T("error_capture");
-        FinishVideoSegment();
-        try { _audio?.Dispose(); } catch { }
-        _audio = null;
-        CleanupTemp();
-        Failed?.Invoke(message);
-        StateChanged?.Invoke();
+        float peak = 0f;
+        for (int i = 0; i + 1 < data.Length; i += 2)
+        {
+            short value = BinaryPrimitives.ReadInt16LittleEndian(data.AsSpan(i, 2));
+            float abs = Math.Abs(value / 32768f);
+            if (abs > peak)
+                peak = abs;
+        }
+
+        return Math.Min(1f, peak);
     }
 
     public void TogglePause()
     {
-        if (!_running) return;
+        if (!_running || Volatile.Read(ref _stopRequested) != 0 || IsEncoding)
+            return;
 
-        if (_paused)
+        try
         {
-            _paused = false;
-            _pauseReached.Reset();
-            if (!StartVideoSegment())
+            if (_paused)
             {
-                _running = false;
-                _clock.Stop();
-                ThreadPool.QueueUserWorkItem(_ => FinalizeAbort());
-                StateChanged?.Invoke();
-                return;
+                _paused = false;
+                _recorder?.Resume();
+                if (_clockStarted)
+                    _clock.Start();
             }
-            _clock.Start();
-            _audio?.Resume();
+            else
+            {
+                _paused = true;
+                _clock.Stop();
+                _recorder?.Pause();
+            }
         }
-        else
+        catch (Exception ex)
         {
-            _paused = true;
-            _clock.Stop();
-            _audio?.Pause();
-            _pauseReached.Wait(2000);
-            FinishVideoSegment();
+            _error ??= Localization.Format("error_capture", ex.Message);
+            RequestStop();
         }
 
         StateChanged?.Invoke();
@@ -396,103 +537,70 @@ public sealed class RecordingSession : IDisposable
 
     public void Stop()
     {
-        if (Interlocked.Exchange(ref _finalized, 1) != 0) return;
+        RequestStop();
+    }
+
+    private void RequestStop()
+    {
+        if (Interlocked.Exchange(ref _stopRequested, 1) != 0)
+            return;
 
         _running = false;
         _clock.Stop();
-        try { _thread?.Join(5000); } catch { }
-        Diag($"Stop requested frames={_frameCount} elapsed={_clock.Elapsed.TotalSeconds:F2}");
 
-        FinishVideoSegment();
-
-        if (_audio != null)
-        {
-            _systemAudioPath = _audio.SystemPath;
-            _micAudioPath = _audio.MicPath;
-            _systemAudioBytes = _audio.SystemBytes;
-            _micAudioBytes = _audio.MicBytes;
-            Diag($"audio bytes system={_systemAudioBytes} mic={_micAudioBytes} errors={string.Join('|', _audio.Errors)}");
-        }
-
-        try { _audio?.Dispose(); } catch { }
-        _audio = null;
+        try { _windowWatch?.Cancel(); } catch { }
 
         IsEncoding = true;
-        StateChanged?.Invoke();
-        Task.Run(FinishEncoding);
-    }
-
-    private void CloseVideoEncoder()
-    {
-        try { _videoStdin?.Flush(); } catch { }
-        try { _videoStdin?.Close(); } catch { }
-        try { _videoStdin?.Dispose(); } catch { }
-        _videoStdin = null;
-
-        var process = _videoProcess;
-        _videoProcess = null;
-        if (process != null)
-        {
-            try
-            {
-                if (!process.WaitForExit(15000))
-                {
-                    try { process.Kill(true); } catch { }
-                }
-            }
-            catch { }
-            finally
-            {
-                try { Diag($"ffmpeg exit={process.ExitCode} stderr={_ffmpegStderr}"); } catch { }
-                try { process.Dispose(); } catch { }
-            }
-        }
-    }
-
-    private void FinishVideoSegment()
-    {
-        string? path = _currentVideoPath;
-        int frames = _segmentFrames;
-        CloseVideoEncoder();
-        _currentVideoPath = null;
-        _segmentFrames = 0;
-
-        if (path == null) return;
-
         try
         {
-            if (frames > 0 && File.Exists(path) && new FileInfo(path).Length > 0)
-            {
-                _videoSegments.Add(path);
-                Diag($"segment finalized {path} frames={frames} len={new FileInfo(path).Length}");
-            }
-            else
-            {
-                try { File.Delete(path); } catch { }
-                Diag($"segment discarded {path} frames={frames}");
-            }
+            _recorder?.Stop();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _error ??= Localization.Format("error_encode", ex.Message);
+            _recordingCompletion?.TrySetResult(null);
+        }
+
+        StateChanged?.Invoke();
+        _ = Task.Run(FinishEncodingAsync);
     }
 
-    private async Task FinishEncoding()
+    private async Task FinishEncodingAsync()
     {
         string? result = null;
         string? error = null;
 
         try
         {
-            _tempVideo = await ConcatVideosAsync().ConfigureAwait(false);
-
-            if (_frameCount == 0 || _tempVideo == null || !File.Exists(_tempVideo) ||
-                new FileInfo(_tempVideo).Length == 0)
+            string? recorded = null;
+            var completion = _recordingCompletion;
+            if (completion != null)
             {
-                error = Localization.Format("error_encode",
-                    string.IsNullOrWhiteSpace(_ffmpegStderr) ? "no frames captured" : _ffmpegStderr!);
+                try
+                {
+                    recorded = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    error = Localization.Format("error_encode", "recording finalize timeout");
+                }
+                catch (Exception ex)
+                {
+                    error = Localization.Format("error_encode", ex.Message);
+                }
             }
-            else
+
+            error ??= _error;
+
+            if (error == null &&
+                (string.IsNullOrWhiteSpace(recorded) || !File.Exists(recorded) ||
+                 new FileInfo(recorded!).Length == 0))
             {
-                Diag($"temp video len={new FileInfo(_tempVideo).Length} frames={_frameCount}");
+                error = Localization.Format("error_encode", "no frames captured");
+            }
+
+            if (error == null)
+            {
                 string outputFolder = string.IsNullOrWhiteSpace(_settings.OutputFolder)
                     ? SettingsStore.CreateDefault().OutputFolder
                     : _settings.OutputFolder;
@@ -502,13 +610,14 @@ public sealed class RecordingSession : IDisposable
                 string fileName = $"iRecord_{DateTime.Now:yyyyMMdd_HHmmss}.{ext}";
                 string target = Path.Combine(outputFolder, fileName);
 
-                var (ok, output) = await EncodeAsync(target).ConfigureAwait(false);
+                var (ok, output) = await EncodeAsync(recorded!, target).ConfigureAwait(false);
                 Diag($"Encode target={target} ok={ok} output={output}");
-                if (ok && File.Exists(target))
+
+                if (ok && File.Exists(target) && new FileInfo(target).Length > 0)
                     result = target;
                 else
                     error = Localization.Format("error_encode",
-                        string.IsNullOrWhiteSpace(output) ? "ffmpeg failed" : output.Trim());
+                        string.IsNullOrWhiteSpace(output) ? "conversion failed" : output.Trim());
             }
         }
         catch (Exception ex)
@@ -518,6 +627,14 @@ public sealed class RecordingSession : IDisposable
         finally
         {
             IsEncoding = false;
+            try { _windowWatch?.Cancel(); } catch { }
+            try { _windowWatch?.Dispose(); } catch { }
+            _windowWatch = null;
+
+            var recorder = _recorder;
+            _recorder = null;
+            try { recorder?.Dispose(); } catch { }
+
             CleanupTemp();
         }
 
@@ -527,73 +644,6 @@ public sealed class RecordingSession : IDisposable
             Failed?.Invoke(error ?? Localization.T("error_encode"));
 
         StateChanged?.Invoke();
-    }
-
-    private async Task<string?> ConcatVideosAsync()
-    {
-        if (_videoSegments.Count == 0) return null;
-        if (_videoSegments.Count == 1) return _videoSegments[0];
-        if (_tempDir == null) return null;
-
-        try
-        {
-            string listPath = Path.Combine(_tempDir, "segments.txt");
-            var lines = _videoSegments.Select(p =>
-                "file '" + p.Replace('\\', '/').Replace("'", "'\\''") + "'");
-            File.WriteAllLines(listPath, lines);
-
-            string outPath = Path.Combine(_tempDir, "video_concat.mp4");
-            var args = new List<string>
-            {
-                "-hide_banner", "-loglevel", "error", "-y",
-                "-f", "concat", "-safe", "0", "-i", listPath,
-                "-c", "copy", "-movflags", "+faststart", outPath
-            };
-
-            var (ok, output) = await FfmpegTools.RunAsync(_ffmpeg, args).ConfigureAwait(false);
-            Diag($"concat segments={_videoSegments.Count} ok={ok} output={output}");
-            if (ok && File.Exists(outPath) && new FileInfo(outPath).Length > 0)
-                return outPath;
-
-            return await ConcatByReencodeAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Diag("concat failed: " + ex);
-            return null;
-        }
-    }
-
-    private async Task<string?> ConcatByReencodeAsync()
-    {
-        if (_tempDir == null) return null;
-
-        string outPath = Path.Combine(_tempDir, "video_concat.mp4");
-        var args = new List<string> { "-hide_banner", "-loglevel", "error", "-y" };
-        foreach (var segment in _videoSegments)
-        {
-            args.Add("-i");
-            args.Add(segment);
-        }
-
-        string filter = string.Concat(Enumerable.Range(0, _videoSegments.Count).Select(i => $"[{i}:v]")) +
-                        $"concat=n={_videoSegments.Count}:v=1:a=0[v]";
-        args.AddRange(new[]
-        {
-            "-filter_complex", filter,
-            "-map", "[v]",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "18",
-            "-pix_fmt", "yuv420p",
-            "-fps_mode", "vfr",
-            "-movflags", "+faststart",
-            outPath
-        });
-
-        var (ok, output) = await FfmpegTools.RunAsync(_ffmpeg, args).ConfigureAwait(false);
-        Diag($"concat reencode ok={ok} output={output}");
-        return ok && File.Exists(outPath) && new FileInfo(outPath).Length > 0 ? outPath : null;
     }
 
     private static string NormalizeFormat(string? format) => format?.Trim().ToLowerInvariant() switch
@@ -607,105 +657,55 @@ public sealed class RecordingSession : IDisposable
 
     private static string ExtensionFor(string? format) => NormalizeFormat(format);
 
-    private async Task<(bool Ok, string Output)> EncodeAsync(string target)
+    private async Task<(bool Ok, string Output)> EncodeAsync(string source, string target)
     {
         string format = NormalizeFormat(_settings.Format);
 
         return format switch
         {
-            "gif" => await EncodeGifAsync(target).ConfigureAwait(false),
-            "webm" => await EncodeWebmAsync(target).ConfigureAwait(false),
-            _ => await EncodeMuxedAsync(target, format).ConfigureAwait(false)
+            "mp4" => MoveToTarget(source, target),
+            "gif" => await EncodeGifAsync(source, target).ConfigureAwait(false),
+            "webm" => await EncodeWebmAsync(source, target).ConfigureAwait(false),
+            _ => await EncodeRemuxAsync(source, target, format).ConfigureAwait(false)
         };
     }
 
-    private async Task<(bool Ok, string Output)> EncodeGifAsync(string target)
+    private async Task<(bool Ok, string Output)> EncodeRemuxAsync(string source, string target, string format)
     {
-        int gifWidth = Math.Min(Width, 1600) & ~1;
-        if (gifWidth < 2) gifWidth = 2;
-
         var args = new List<string>
         {
             "-hide_banner", "-loglevel", "error", "-y",
-            "-i", _tempVideo!,
-            "-vf", $"fps={_settings.GifFps},scale={gifWidth}:-2:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5",
-            "-loop", "0",
-            target
-        };
-        return await FfmpegTools.RunAsync(_ffmpeg, args).ConfigureAwait(false);
-    }
-
-    private async Task<(bool Ok, string Output)> EncodeMuxedAsync(string target, string format)
-    {
-        var systemAudio = _systemAudioPath;
-        var micAudio = _micAudioPath;
-
-        bool hasSystem = _systemAudioBytes > 0 && systemAudio != null && File.Exists(systemAudio);
-        bool hasMic = _micAudioBytes > 0 && micAudio != null && File.Exists(micAudio);
-
-        if (!hasSystem && !hasMic)
-        {
-            if (format == "mp4")
-                return MoveTempToTarget(target);
-        }
-
-        var args = new List<string>
-        {
-            "-hide_banner", "-loglevel", "error", "-y",
-            "-i", _tempVideo!
+            "-i", source,
+            "-map", "0:v:0", "-map", "0:a?",
+            "-c", "copy"
         };
 
-        if (hasSystem) args.AddRange(new[] { "-i", systemAudio! });
-        if (hasMic) args.AddRange(new[] { "-i", micAudio! });
-
-        if (hasSystem && hasMic)
-        {
-            args.AddRange(new[]
-            {
-                "-filter_complex",
-                "[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a1];" +
-                "[2:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a2];" +
-                "[a1][a2]amix=inputs=2:duration=longest:dropout_transition=0[a]",
-                "-map", "0:v:0", "-map", "[a]",
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-shortest"
-            });
-        }
-        else if (hasSystem || hasMic)
-        {
-            args.AddRange(new[]
-            {
-                "-map", "0:v:0", "-map", "1:a:0",
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-ar", "48000",
-                "-ac", "2",
-                "-shortest"
-            });
-        }
-        else
-        {
-            args.AddRange(new[] { "-map", "0:v:0", "-c:v", "copy" });
-        }
-
-        if (format is "mp4" or "mov")
+        if (format == "mov")
             args.AddRange(new[] { "-movflags", "+faststart" });
 
         args.Add(target);
         return await FfmpegTools.RunAsync(_ffmpeg, args).ConfigureAwait(false);
     }
 
-    private async Task<(bool Ok, string Output)> EncodeWebmAsync(string target)
+    private async Task<(bool Ok, string Output)> EncodeGifAsync(string source, string target)
     {
-        var systemAudio = _systemAudioPath;
-        var micAudio = _micAudioPath;
+        int gifWidth = Math.Min(_recordWidth, 1600) & ~1;
+        if (gifWidth < 2) gifWidth = 2;
 
-        bool hasSystem = _systemAudioBytes > 0 && systemAudio != null && File.Exists(systemAudio);
-        bool hasMic = _micAudioBytes > 0 && micAudio != null && File.Exists(micAudio);
+        var args = new List<string>
+        {
+            "-hide_banner", "-loglevel", "error", "-y",
+            "-i", source,
+            "-vf", $"fps={_settings.GifFps},scale={gifWidth}:-2:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5",
+            "-an",
+            "-loop", "0",
+            target
+        };
+        return await FfmpegTools.RunAsync(_ffmpeg, args).ConfigureAwait(false);
+    }
 
+    private async Task<(bool Ok, string Output)> EncodeWebmAsync(string source, string target)
+    {
         string crf = _settings.Quality switch
         {
             "low" => "42",
@@ -716,67 +716,29 @@ public sealed class RecordingSession : IDisposable
         var args = new List<string>
         {
             "-hide_banner", "-loglevel", "error", "-y",
-            "-i", _tempVideo!
-        };
-
-        if (hasSystem) args.AddRange(new[] { "-i", systemAudio! });
-        if (hasMic) args.AddRange(new[] { "-i", micAudio! });
-
-        if (hasSystem && hasMic)
-        {
-            args.AddRange(new[]
-            {
-                "-filter_complex",
-                "[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a1];" +
-                "[2:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a2];" +
-                "[a1][a2]amix=inputs=2:duration=longest:dropout_transition=0[a]",
-                "-map", "0:v:0", "-map", "[a]"
-            });
-        }
-        else if (hasSystem || hasMic)
-        {
-            args.AddRange(new[] { "-map", "0:v:0", "-map", "1:a:0" });
-        }
-        else
-        {
-            args.AddRange(new[] { "-map", "0:v:0" });
-        }
-
-        args.AddRange(new[]
-        {
+            "-i", source,
+            "-map", "0:v:0", "-map", "0:a?",
             "-c:v", "libvpx-vp9",
             "-b:v", "0",
             "-crf", crf,
             "-row-mt", "1",
             "-cpu-used", "4",
-            "-pix_fmt", "yuv420p"
-        });
+            "-pix_fmt", "yuv420p",
+            "-c:a", "libopus",
+            "-b:a", "128k",
+            "-ar", "48000",
+            "-ac", "2",
+            target
+        };
 
-        if (hasSystem || hasMic)
-        {
-            args.AddRange(new[]
-            {
-                "-c:a", "libopus",
-                "-b:a", "128k",
-                "-ar", "48000",
-                "-ac", "2",
-                "-shortest"
-            });
-        }
-
-        args.Add(target);
         return await FfmpegTools.RunAsync(_ffmpeg, args).ConfigureAwait(false);
     }
 
-    private (bool Ok, string Output) MoveTempToTarget(string target)
+    private (bool Ok, string Output) MoveToTarget(string source, string target)
     {
         try
         {
-            bool existed = File.Exists(target);
-            long before = existed ? new FileInfo(target).Length : -1;
-            Diag($"moving temp({new FileInfo(_tempVideo!).Length}) -> {target} existed={existed} before={before}");
-            File.Move(_tempVideo!, target, overwrite: true);
-            Diag($"moved target len={new FileInfo(target).Length}");
+            File.Move(source, target, overwrite: true);
             return (true, string.Empty);
         }
         catch (Exception ex)
@@ -800,10 +762,20 @@ public sealed class RecordingSession : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         _running = false;
-        try { _thread?.Join(1000); } catch { }
-        CloseVideoEncoder();
-        try { _audio?.Dispose(); } catch { }
+        _clock.Stop();
+
+        try { _windowWatch?.Cancel(); } catch { }
+        try { _windowWatch?.Dispose(); } catch { }
+        _windowWatch = null;
+
+        try { _recorder?.Stop(); } catch { }
+        try { _recorder?.Dispose(); } catch { }
+        _recorder = null;
+        _recordingCompletion?.TrySetResult(null);
         CleanupTemp();
     }
 }

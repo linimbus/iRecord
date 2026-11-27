@@ -21,7 +21,7 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 }
 
-$requiredFiles = @("iRecord.exe", "iRecord-cli.exe")
+$requiredFiles = @("iRecord.exe", "iRecord-cli.exe", "ScreenRecorderLib.dll")
 foreach ($file in $requiredFiles) {
     if (-not (Test-Path (Join-Path $outputPath $file))) {
         throw "Missing '$file' in '$outputPath'. Run without -SkipBuild first."
@@ -47,6 +47,13 @@ try {
         $target = Join-Path $stage "skills"
         New-Item -ItemType Directory -Path $target | Out-Null
         Copy-Item (Join-Path $skills "*") $target -Recurse
+    }
+
+    $docs = Join-Path $root "docs"
+    if (Test-Path $docs) {
+        $target = Join-Path $stage "docs"
+        New-Item -ItemType Directory -Path $target | Out-Null
+        Copy-Item (Join-Path $docs "*") $target -Recurse
     }
 
     $zipName = "iRecord-v$version-$Runtime.zip"

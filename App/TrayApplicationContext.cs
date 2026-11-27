@@ -27,6 +27,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private bool _panelShouldReturn;
     private bool _editorsTopMostSuspended;
     private bool _capturingScreenshot;
+    private bool _startingRecording;
 
     public TrayApplicationContext()
     {
@@ -54,7 +55,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         RebuildMenu();
         RegisterHotkeys();
 
-        if (FfmpegTools.Resolve(_settings.FfmpegPath) == null)
+        if (NeedsFfmpeg(_settings.Format) && FfmpegTools.Resolve(_settings.FfmpegPath) == null)
         {
             Post(() => ShowBalloon(Localization.T("notify_error_title"),
                 Localization.T("notify_ffmpeg_missing"), ToolTipIcon.Warning));
@@ -145,6 +146,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         "window" => CaptureMode.Window,
         _ => CaptureMode.FullScreen
     };
+
+    private static bool NeedsFfmpeg(string? format) =>
+        !(string.IsNullOrWhiteSpace(format) ||
+          string.Equals(format.Trim(), "mp4", StringComparison.OrdinalIgnoreCase));
 
     private void RebuildMenu()
     {
@@ -340,14 +345,39 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void StartRecording(CaptureMode mode)
     {
-        if (_session != null) return;
+        if (_session != null || _startingRecording) return;
 
-        if (FfmpegTools.Resolve(_settings.FfmpegPath) == null)
+        _startingRecording = true;
+        try
+        {
+            StartRecordingCore(mode);
+        }
+        finally
+        {
+            _startingRecording = false;
+        }
+    }
+
+    private void StartRecordingCore(CaptureMode mode)
+    {
+        if (NeedsFfmpeg(_settings.Format) && FfmpegTools.Resolve(_settings.FfmpegPath) == null)
         {
             ShowBalloon(Localization.T("notify_error_title"),
-                Localization.T("notify_ffmpeg_missing"), ToolTipIcon.Warning);
-            OpenSettings();
+                Localization.T("notify_ffmpeg_missing"), ToolTipIcon.Error);
+            ReturnPanelIfNeeded();
             return;
+        }
+
+        bool selectScreen = mode == CaptureMode.FullScreen && Screen.AllScreens.Length > 1;
+        _panelShouldReturn = _panel?.Visible == true;
+        bool panelHiddenForPicker = false;
+
+        if (selectScreen && _panelShouldReturn)
+        {
+            _panel!.Hide();
+            Application.DoEvents();
+            Thread.Sleep(150);
+            panelHiddenForPicker = true;
         }
 
         Rectangle rect;
@@ -372,18 +402,36 @@ public sealed class TrayApplicationContext : ApplicationContext
             }
             default:
             {
-                var screen = Screen.FromPoint(Cursor.Position) ?? Screen.PrimaryScreen;
-                rect = screen?.Bounds ?? SystemInformation.VirtualScreen;
+                if (selectScreen)
+                {
+                    using var picker = new FullscreenScreenSelectorForm();
+                    if (picker.ShowDialog() != DialogResult.OK)
+                    {
+                        ReturnPanelIfNeeded();
+                        return;
+                    }
+
+                    rect = picker.SelectedScreenBounds;
+                }
+                else
+                {
+                    var screen = Screen.FromPoint(Cursor.Position) ?? Screen.PrimaryScreen;
+                    rect = screen?.Bounds ?? SystemInformation.VirtualScreen;
+                }
+
                 mode = CaptureMode.FullScreen;
                 break;
             }
         }
 
         if (rect.Width < 8 || rect.Height < 8)
+        {
+            if (panelHiddenForPicker)
+                ReturnPanelIfNeeded();
             return;
+        }
 
-        _panelShouldReturn = _panel?.Visible == true;
-        if (_panelShouldReturn)
+        if (!panelHiddenForPicker && _panelShouldReturn)
         {
             _panel!.Hide();
             Application.DoEvents();

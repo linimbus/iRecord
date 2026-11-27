@@ -45,6 +45,14 @@ public sealed class ImageEditorForm : Form
         ExtraThick
     }
 
+    private enum ElementKind
+    {
+        Shape,
+        Text,
+        Number,
+        Mosaic
+    }
+
     private enum EditorIcon
     {
         Text,
@@ -74,13 +82,15 @@ public sealed class ImageEditorForm : Form
     }
 
     private Bitmap _image;
+    private Bitmap _baseImage;
     private string _path;
-    private readonly List<Bitmap> _undo = new();
-    private readonly List<ShapeAnnotation> _shapes = new();
+    private readonly List<Bitmap> _allBases = new();
+    private readonly List<EditorSnapshot> _undo = new();
+    private readonly List<EditorElement> _elements = new();
     private readonly List<Point> _freeformPoints = new();
-    private Bitmap? _shapeBase;
-    private ShapeAnnotation? _movingShape;
-    private ShapeAnnotation? _moveOriginal;
+    private EditorElement? _selectedElement;
+    private EditorElement? _movingShape;
+    private EditorElement? _moveOriginal;
     private Point _moveStartImage;
     private bool _moveUndoPushed;
     private bool _filledShapes;
@@ -128,7 +138,9 @@ public sealed class ImageEditorForm : Form
 
     public ImageEditorForm(Bitmap image, string path)
     {
-        _image = image;
+        _baseImage = image;
+        _image = new Bitmap(image);
+        _allBases.Add(_baseImage);
         _path = path;
 
         Text = Localization.T("editor_title");
@@ -269,6 +281,12 @@ public sealed class ImageEditorForm : Form
         if (keyData == (Keys.Control | Keys.C))
         {
             CopyFromToolbar();
+            return true;
+        }
+
+        if (keyData == Keys.Delete && _selectedElement != null)
+        {
+            DeleteSelectedElement();
             return true;
         }
 
@@ -424,11 +442,13 @@ public sealed class ImageEditorForm : Form
                 return;
             case EditorTool.Move:
             {
-                var shape = FindShape(point);
-                if (shape != null)
+                var element = FindElement(point);
+                _selectedElement = element;
+                canvas.Invalidate();
+                if (element != null)
                 {
-                    _movingShape = shape;
-                    _moveOriginal = shape.Clone();
+                    _movingShape = element;
+                    _moveOriginal = element.Clone();
                     _moveStartImage = point;
                     _moveUndoPushed = false;
                     canvas.Capture = true;
@@ -440,11 +460,7 @@ public sealed class ImageEditorForm : Form
                 BeginInlineText(point, e.Location);
                 return;
             case EditorTool.Number:
-                BakeShapes();
-                PushUndo();
-                using (var g = Graphics.FromImage(_image))
-                    DrawNumber(g, _nextNumber++, point);
-                canvas.Invalidate();
+                AddNumberElement(point);
                 return;
             case EditorTool.Freeform:
                 _dragging = true;
@@ -493,8 +509,7 @@ public sealed class ImageEditorForm : Form
             }
 
             _movingShape.ApplyOffset(_moveOriginal, dx, dy);
-            RenderShapes();
-            canvas.Invalidate();
+            RenderAll();
             return;
         }
 
@@ -589,12 +604,9 @@ public sealed class ImageEditorForm : Form
 
         if (_tool == EditorTool.Mosaic)
         {
-            BakeShapes();
-            PushUndo();
             var block = Math.Clamp(Math.Min(rect.Width, rect.Height) / 18, 6, 24);
-            Pixelate(rect, block);
+            AddMosaicElement(rect, block);
             canvas.Capture = false;
-            canvas.Invalidate();
         }
     }
 
@@ -614,9 +626,9 @@ public sealed class ImageEditorForm : Form
 
         if (_tool == EditorTool.Move)
         {
-            bool overShape = TryMapPoint(canvas.ClientSize, displayPoint, out var point) &&
-                             FindShape(point) != null;
-            canvas.Cursor = overShape ? Cursors.SizeAll : Cursors.Default;
+            bool overElement = TryMapPoint(canvas.ClientSize, displayPoint, out var point) &&
+                               FindElement(point) != null;
+            canvas.Cursor = overElement ? Cursors.SizeAll : Cursors.Default;
             return;
         }
 
@@ -808,13 +820,7 @@ public sealed class ImageEditorForm : Form
         _inlineClosing = false;
 
         if (!string.IsNullOrWhiteSpace(text))
-        {
-            BakeShapes();
-            PushUndo();
-            using var g = Graphics.FromImage(_image);
-            DrawText(g, text, _inlineImagePoint);
-            _canvas.Invalidate();
-        }
+            AddTextElement(text);
     }
 
     private void CancelInlineText()
@@ -872,6 +878,30 @@ public sealed class ImageEditorForm : Form
 
         if (_dragging)
             DrawPreview(g);
+
+        DrawSelection(g);
+    }
+
+    private void DrawSelection(Graphics g)
+    {
+        if (_selectedElement == null)
+            return;
+
+        var bounds = _selectedElement.GetBounds();
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+            return;
+
+        var rect = new RectangleF(
+            (float)(_viewOffsetX + bounds.Left * ViewScaleX),
+            (float)(_viewOffsetY + bounds.Top * ViewScaleY),
+            (float)(bounds.Width * ViewScaleX),
+            (float)(bounds.Height * ViewScaleY));
+
+        using var pen = new Pen(Color.FromArgb(235, 120, 190, 255), Math.Max(1f, 1.5f * Dpi.Scale))
+        {
+            DashStyle = DashStyle.Dash
+        };
+        g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
     }
 
     private void DrawPreview(Graphics g)
@@ -979,15 +1009,15 @@ public sealed class ImageEditorForm : Form
         g.DrawString(number.ToString(), font, Brushes.White, rect, format);
     }
 
-    private void Pixelate(Rectangle region, int block)
+    private static void PixelateBitmap(Bitmap target, Rectangle region, int block)
     {
-        region.Intersect(new Rectangle(0, 0, _image.Width, _image.Height));
+        region.Intersect(new Rectangle(0, 0, target.Width, target.Height));
         if (region.Width <= 0 || region.Height <= 0)
             return;
 
-        var data = _image.LockBits(new Rectangle(0, 0, _image.Width, _image.Height),
+        var data = target.LockBits(new Rectangle(0, 0, target.Width, target.Height),
             ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
-        int length = data.Stride * _image.Height;
+        int length = data.Stride * target.Height;
         byte[] bytes = ArrayPool<byte>.Shared.Rent(length);
 
         try
@@ -1041,19 +1071,19 @@ public sealed class ImageEditorForm : Form
         }
         finally
         {
-            _image.UnlockBits(data);
+            target.UnlockBits(data);
             ArrayPool<byte>.Shared.Return(bytes);
         }
     }
 
     private void PushUndo()
     {
-        _undo.Add((Bitmap)_image.Clone());
-        if (_undo.Count > 20)
+        _undo.Add(new EditorSnapshot
         {
-            _undo[0].Dispose();
-            _undo.RemoveAt(0);
-        }
+            Base = _baseImage,
+            Elements = _elements.Select(e => e.Clone()).ToList(),
+            NextNumber = _nextNumber
+        });
     }
 
     private void Undo()
@@ -1062,13 +1092,19 @@ public sealed class ImageEditorForm : Form
         if (_undo.Count == 0)
             return;
 
-        ClearShapeState();
-        var previous = _undo[^1];
+        var snapshot = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
-        var oldSize = _image.Size;
-        _image.Dispose();
-        _image = previous;
-        if (_image.Width != oldSize.Width || _image.Height != oldSize.Height)
+        var oldSize = _baseImage.Size;
+        _baseImage = snapshot.Base;
+        _elements.Clear();
+        _elements.AddRange(snapshot.Elements);
+        _nextNumber = snapshot.NextNumber;
+        _toolbar?.SetNextNumber(_nextNumber);
+        _selectedElement = null;
+        _movingShape = null;
+        _moveOriginal = null;
+        RenderAll();
+        if (_baseImage.Width != oldSize.Width || _baseImage.Height != oldSize.Height)
         {
             CenterView();
             UpdateStatus();
@@ -1111,7 +1147,7 @@ public sealed class ImageEditorForm : Form
 
     private void ApplyResize(int width, int height)
     {
-        if (width == _image.Width && height == _image.Height)
+        if (width == _baseImage.Width && height == _baseImage.Height)
             return;
 
         Bitmap resized;
@@ -1122,7 +1158,7 @@ public sealed class ImageEditorForm : Form
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.SmoothingMode = SmoothingMode.HighQuality;
-            g.DrawImage(_image, 0, 0, width, height);
+            g.DrawImage(_baseImage, 0, 0, width, height);
         }
         catch (Exception ex)
         {
@@ -1132,13 +1168,17 @@ public sealed class ImageEditorForm : Form
         }
 
         PushUndo();
-        ClearShapeState();
-        var old = _image;
-        _image = resized;
-        old.Dispose();
+        float sx = width / (float)_baseImage.Width;
+        float sy = height / (float)_baseImage.Height;
+        float fontScale = (sx + sy) / 2f;
+        foreach (var element in _elements)
+            element.Scale(sx, sy, fontScale);
+
+        _baseImage = resized;
+        _allBases.Add(resized);
+        RenderAll();
         CenterView();
         UpdateStatus();
-        _canvas.Invalidate();
         ShowToast(Localization.T("editor_status_resized"));
     }
 
@@ -1308,11 +1348,11 @@ public sealed class ImageEditorForm : Form
             _inlineInput = null;
             try { _inlineOverlay?.Dispose(); } catch { }
             _inlineOverlay = null;
-            ClearShapeState();
-            _image.Dispose();
-            foreach (var bitmap in _undo)
-                bitmap.Dispose();
             _undo.Clear();
+            _image.Dispose();
+            foreach (var baseImage in _allBases)
+                baseImage.Dispose();
+            _allBases.Clear();
         }
         base.Dispose(disposing);
     }
@@ -1454,9 +1494,6 @@ public sealed class ImageEditorForm : Form
             }
             case EditorIcon.Number:
                 g.DrawEllipse(pen, inner);
-                g.DrawLine(pen, cx - Dpi.S(2), cy - Dpi.S(3), cx, cy - Dpi.S(5));
-                g.DrawLine(pen, cx, cy - Dpi.S(5), cx, cy + Dpi.S(4));
-                g.DrawLine(pen, cx - Dpi.S(2), cy + Dpi.S(4), cx + Dpi.S(2), cy + Dpi.S(4));
                 break;
             case EditorIcon.Arrow:
             case EditorIcon.ArrowDashed:
@@ -1621,28 +1658,46 @@ public sealed class ImageEditorForm : Form
         }
     }
 
-    private sealed class ShapeAnnotation
+    private sealed class EditorElement
     {
+        public ElementKind Kind { get; init; } = ElementKind.Shape;
         public EditorTool Tool { get; init; }
         public Point Start { get; set; }
         public Point End { get; set; }
         public List<Point>? Points { get; set; }
         public Color Color { get; init; }
-        public int Width { get; init; }
+        public int Width { get; set; }
         public bool Filled { get; init; }
+        public string? Text { get; init; }
+        public string FontFamily { get; init; } = "Segoe UI";
+        public FontStyle FontStyle { get; init; } = FontStyle.Regular;
+        public float FontSize { get; set; }
+        public Size TextSize { get; set; }
+        public int Number { get; init; }
+        public int Diameter { get; set; }
+        public int MosaicBlock { get; set; }
 
-        public ShapeAnnotation Clone() => new()
+        public EditorElement Clone() => new()
         {
+            Kind = Kind,
             Tool = Tool,
             Start = Start,
             End = End,
             Points = Points?.ToList(),
             Color = Color,
             Width = Width,
-            Filled = Filled
+            Filled = Filled,
+            Text = Text,
+            FontFamily = FontFamily,
+            FontStyle = FontStyle,
+            FontSize = FontSize,
+            TextSize = TextSize,
+            Number = Number,
+            Diameter = Diameter,
+            MosaicBlock = MosaicBlock
         };
 
-        public void ApplyOffset(ShapeAnnotation original, int dx, int dy)
+        public void ApplyOffset(EditorElement original, int dx, int dy)
         {
             Start = new Point(original.Start.X + dx, original.Start.Y + dy);
             End = new Point(original.End.X + dx, original.End.Y + dy);
@@ -1650,8 +1705,43 @@ public sealed class ImageEditorForm : Form
                 Points = original.Points.Select(p => new Point(p.X + dx, p.Y + dy)).ToList();
         }
 
+        public void Scale(float sx, float sy, float fontScale)
+        {
+            Start = new Point((int)Math.Round(Start.X * sx), (int)Math.Round(Start.Y * sy));
+            End = new Point((int)Math.Round(End.X * sx), (int)Math.Round(End.Y * sy));
+            if (Points != null)
+                Points = Points.Select(p => new Point((int)Math.Round(p.X * sx), (int)Math.Round(p.Y * sy))).ToList();
+            Width = Math.Max(1, (int)Math.Round(Width * fontScale));
+            FontSize = Math.Max(1f, FontSize * fontScale);
+            TextSize = new Size(
+                Math.Max(1, (int)Math.Round(TextSize.Width * sx)),
+                Math.Max(1, (int)Math.Round(TextSize.Height * sy)));
+            Diameter = Math.Max(1, (int)Math.Round(Diameter * fontScale));
+            MosaicBlock = Math.Max(1, (int)Math.Round(MosaicBlock * fontScale));
+        }
+
         public Rectangle GetBounds()
         {
+            switch (Kind)
+            {
+                case ElementKind.Text:
+                    return new Rectangle(Start, TextSize);
+
+                case ElementKind.Number:
+                    return new Rectangle(
+                        Start.X - Diameter / 2,
+                        Start.Y - Diameter / 2,
+                        Diameter,
+                        Diameter);
+
+                case ElementKind.Mosaic:
+                    return Rectangle.FromLTRB(
+                        Math.Min(Start.X, End.X),
+                        Math.Min(Start.Y, End.Y),
+                        Math.Max(Start.X, End.X),
+                        Math.Max(Start.Y, End.Y));
+            }
+
             if (Points is { Count: > 0 })
             {
                 int minX = Points[0].X;
@@ -1678,10 +1768,17 @@ public sealed class ImageEditorForm : Form
         public bool HitTest(Point point)
         {
             var bounds = GetBounds();
-            int padding = Math.Max(10, Width + 6);
+            int padding = Math.Max(6, Width + 4);
             bounds.Inflate(padding, padding);
             return bounds.Contains(point);
         }
+    }
+
+    private sealed class EditorSnapshot
+    {
+        public Bitmap Base { get; init; } = null!;
+        public List<EditorElement> Elements { get; init; } = new();
+        public int NextNumber { get; init; }
     }
 
     private static RectangleF NormalizedRect(PointF a, PointF b) => RectangleF.FromLTRB(
@@ -1822,59 +1919,124 @@ public sealed class ImageEditorForm : Form
         }
     }
 
-    private void DrawShapeToImage(Graphics g, ShapeAnnotation shape)
+    private void DrawShapeToImage(Graphics g, EditorElement shape)
     {
         var points = shape.Points?.Select(p => (PointF)p).ToList();
         DrawShape(g, shape.Tool, shape.Start, shape.End, points,
             shape.Color, shape.Width, shape.Filled, false);
     }
 
-    private void EnsureShapeBase()
+    private void RenderAll()
     {
-        _shapeBase ??= new Bitmap(_image);
-    }
-
-    private void RenderShapes()
-    {
-        if (_shapeBase == null)
-            return;
-
-        var next = new Bitmap(_shapeBase);
-        using (var g = Graphics.FromImage(next))
+        var next = new Bitmap(_baseImage);
+        foreach (var element in _elements)
         {
+            if (element.Kind == ElementKind.Mosaic)
+            {
+                PixelateBitmap(next, element.GetBounds(), element.MosaicBlock);
+                continue;
+            }
+
+            using var g = Graphics.FromImage(next);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            foreach (var shape in _shapes)
-                DrawShapeToImage(g, shape);
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+            switch (element.Kind)
+            {
+                case ElementKind.Text:
+                    DrawTextElement(g, element);
+                    break;
+                case ElementKind.Number:
+                    DrawNumberElement(g, element);
+                    break;
+                default:
+                    DrawShapeToImage(g, element);
+                    break;
+            }
         }
 
         var old = _image;
         _image = next;
         old.Dispose();
+        _canvas.Invalidate();
     }
 
-    private void ClearShapeState()
+    private void DrawTextElement(Graphics g, EditorElement element)
     {
-        _shapes.Clear();
-        _shapeBase?.Dispose();
-        _shapeBase = null;
-        _movingShape = null;
-        _moveOriginal = null;
-    }
-
-    private void BakeShapes()
-    {
-        if (_shapes.Count == 0)
+        string text = element.Text ?? string.Empty;
+        if (text.Length == 0)
             return;
 
-        ClearShapeState();
+        using var font = new Font(element.FontFamily, element.FontSize,
+            element.FontStyle, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(element.Color);
+        using var shadow = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
+
+        int offset = Math.Max(1, (int)Math.Round(element.FontSize / 14f));
+        foreach (var (dx, dy) in new[]
+                 {
+                     (-offset, 0), (offset, 0), (0, -offset), (0, offset),
+                     (-offset, -offset), (offset, offset)
+                 })
+        {
+            g.DrawString(text, font, shadow,
+                element.Start.X + dx, element.Start.Y + dy);
+        }
+
+        g.DrawString(text, font, brush, element.Start.X, element.Start.Y);
     }
 
-    private ShapeAnnotation? FindShape(Point imagePoint)
+    private void DrawNumberElement(Graphics g, EditorElement element)
     {
-        for (int i = _shapes.Count - 1; i >= 0; i--)
+        int diameter = Math.Max(1, element.Diameter);
+        int scale = 3;
+        int size = Math.Max(1, diameter * scale);
+        var rect = new Rectangle(
+            element.Start.X - diameter / 2,
+            element.Start.Y - diameter / 2,
+            diameter,
+            diameter);
+
+        using var marker = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+        using (var mg = Graphics.FromImage(marker))
         {
-            if (_shapes[i].HitTest(imagePoint))
-                return _shapes[i];
+            mg.SmoothingMode = SmoothingMode.AntiAlias;
+            mg.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            mg.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            mg.CompositingQuality = CompositingQuality.HighQuality;
+            mg.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            mg.Clear(Color.Transparent);
+
+            using var fill = new SolidBrush(element.Color);
+            mg.FillEllipse(fill, 0, 0, size, size);
+
+            using var font = new Font(element.FontFamily, size * 0.5f,
+                element.FontStyle, GraphicsUnit.Pixel);
+            using var format = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+            mg.DrawString(element.Number.ToString(), font, Brushes.White,
+                new RectangleF(0, 0, size, size), format);
+        }
+
+        var state = g.Save();
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.DrawImage(marker, rect);
+        g.Restore(state);
+    }
+
+    private EditorElement? FindElement(Point imagePoint)
+    {
+        for (int i = _elements.Count - 1; i >= 0; i--)
+        {
+            if (_elements[i].HitTest(imagePoint))
+                return _elements[i];
         }
         return null;
     }
@@ -1882,9 +2044,9 @@ public sealed class ImageEditorForm : Form
     private void AddShape(EditorTool tool, Point start, Point end, List<Point>? points)
     {
         PushUndo();
-        EnsureShapeBase();
-        _shapes.Add(new ShapeAnnotation
+        _elements.Add(new EditorElement
         {
+            Kind = ElementKind.Shape,
             Tool = tool,
             Start = start,
             End = end,
@@ -1893,8 +2055,90 @@ public sealed class ImageEditorForm : Form
             Width = LineWidth(),
             Filled = _filledShapes
         });
-        RenderShapes();
-        _canvas.Invalidate();
+        RenderAll();
+    }
+
+    private void AddTextElement(string text)
+    {
+        using var g = _canvas.CreateGraphics();
+        using var font = new Font(_textFontFamily, EffectiveTextFontSize,
+            _textFontStyle, GraphicsUnit.Pixel);
+        string[] lines = text.Split('\n');
+        float maxWidth = 0;
+        foreach (var line in lines)
+            maxWidth = Math.Max(maxWidth, g.MeasureString(line, font).Width);
+        float lineHeight = font.GetHeight(g);
+        var size = new Size(
+            Math.Max(1, (int)Math.Ceiling(maxWidth)),
+            Math.Max(1, (int)Math.Ceiling(lineHeight * lines.Length)));
+
+        PushUndo();
+        _elements.Add(new EditorElement
+        {
+            Kind = ElementKind.Text,
+            Start = _inlineImagePoint,
+            End = _inlineImagePoint,
+            Text = text,
+            Color = _color,
+            FontFamily = _textFontFamily,
+            FontStyle = _textFontStyle,
+            FontSize = EffectiveTextFontSize,
+            TextSize = size
+        });
+        RenderAll();
+    }
+
+    private void ResetNumbering()
+    {
+        _nextNumber = 1;
+        _toolbar?.SetNextNumber(_nextNumber);
+        ShowToast(Localization.T("editor_number_reset"));
+    }
+
+    private void AddNumberElement(Point point)
+    {
+        PushUndo();
+        int diameter = Math.Clamp((int)Math.Round(Math.Min(_image.Width, _image.Height) / 22.0), 24, 96);
+        _elements.Add(new EditorElement
+        {
+            Kind = ElementKind.Number,
+            Start = point,
+            End = point,
+            Color = _color,
+            FontFamily = _textFontFamily,
+            FontStyle = _textFontStyle,
+            Number = _nextNumber,
+            Diameter = diameter
+        });
+        _nextNumber++;
+        _toolbar?.SetNextNumber(_nextNumber);
+        RenderAll();
+    }
+
+    private void AddMosaicElement(Rectangle rect, int block)
+    {
+        PushUndo();
+        _elements.Add(new EditorElement
+        {
+            Kind = ElementKind.Mosaic,
+            Start = new Point(rect.Left, rect.Top),
+            End = new Point(rect.Right, rect.Bottom),
+            MosaicBlock = block
+        });
+        RenderAll();
+    }
+
+    private void DeleteSelectedElement()
+    {
+        if (_selectedElement == null)
+            return;
+
+        PushUndo();
+        _elements.Remove(_selectedElement);
+        _selectedElement = null;
+        _movingShape = null;
+        _moveOriginal = null;
+        RenderAll();
     }
 
     private void AddFreeformShape()
@@ -2111,6 +2355,7 @@ public sealed class ImageEditorForm : Form
             AddTool(EditorTool.Mosaic, EditorIcon.Mosaic, "editor_tool_mosaic");
             AddTool(EditorTool.Move, EditorIcon.Move, "editor_tool_move");
             AddTool(EditorTool.Pan, EditorIcon.Pan, "editor_tool_pan");
+            SetNextNumber(_editor._nextNumber);
 
             _fontCombo.DropDownStyle = ComboBoxStyle.DropDownList;
             _fontCombo.Font = new Font("Segoe UI", 9f);
@@ -2239,6 +2484,8 @@ public sealed class ImageEditorForm : Form
         {
             var button = new IconToolButton(icon);
             button.Click += (_, _) => _editor.SelectTool(tool);
+            if (tool == EditorTool.Number)
+                button.DoubleClick += (_, _) => _editor.ResetNumbering();
             _toolTip.SetToolTip(button, Localization.T(tooltipKey));
             Controls.Add(button);
             _toolButtons[tool] = button;
@@ -2296,6 +2543,12 @@ public sealed class ImageEditorForm : Form
             Height = Dpi.S(76);
         }
 
+        public void SetNextNumber(int number)
+        {
+            if (_toolButtons.TryGetValue(EditorTool.Number, out var button))
+                button.SetBadgeNumber(number);
+        }
+
         public void SetActiveTool(EditorTool tool)
         {
             foreach (var pair in _toolButtons)
@@ -2326,12 +2579,14 @@ public sealed class ImageEditorForm : Form
         private bool _pressed;
         private bool _active;
         private Color _swatch = Color.FromArgb(255, 64, 64);
+        private int _badgeNumber = -1;
 
         public IconToolButton(EditorIcon icon)
         {
             _icon = icon;
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
+                     ControlStyles.StandardClick | ControlStyles.StandardDoubleClick, true);
             FlatStyle = FlatStyle.Flat;
             FlatAppearance.BorderSize = 0;
             UseVisualStyleBackColor = false;
@@ -2344,6 +2599,13 @@ public sealed class ImageEditorForm : Form
         {
             if (_active == active) return;
             _active = active;
+            Invalidate();
+        }
+
+        public void SetBadgeNumber(int number)
+        {
+            if (_badgeNumber == number) return;
+            _badgeNumber = number;
             Invalidate();
         }
 
@@ -2403,6 +2665,20 @@ public sealed class ImageEditorForm : Form
 
             var color = _active || _hover ? IconActiveColor : IconColor;
             DrawEditorIcon(g, new Rectangle(0, 0, Width, Height), _icon, color, _swatch);
+
+            if (_icon == EditorIcon.Number && _badgeNumber >= 0)
+            {
+                var inner = new Rectangle(
+                    Dpi.S(6), Dpi.S(6),
+                    Math.Max(1, Width - Dpi.S(12)),
+                    Math.Max(1, Height - Dpi.S(12)));
+                float scale = _badgeNumber >= 100 ? 0.2f : _badgeNumber >= 10 ? 0.23f : 0.26f;
+                using var font = new Font("Segoe UI", Math.Max(6f, Height * scale),
+                    FontStyle.Bold, GraphicsUnit.Pixel);
+                TextRenderer.DrawText(g, _badgeNumber.ToString(), font, inner, color,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+            }
         }
     }
 }

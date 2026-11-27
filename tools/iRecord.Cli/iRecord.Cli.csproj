@@ -9,19 +9,30 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>iRecord-cli</AssemblyName>
     <RootNamespace>iRecord.CliLauncher</RootNamespace>
-    <Version>1.5.2</Version>
-    <FileVersion>1.5.2.0</FileVersion>
-    <AssemblyVersion>1.5.2.0</AssemblyVersion>
+    <Version>1.5.4</Version>
+    <FileVersion>1.5.4.0</FileVersion>
+    <AssemblyVersion>1.5.4.0</AssemblyVersion>
     <Product>iRecord</Product>
     <AssemblyTitle>iRecord CLI</AssemblyTitle>
     <Company>iRecord</Company>
     <Description>Headless command line interface for iRecord.</Description>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Platforms>x64</Platforms>
+    <Platform>x64</Platform>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\iRecord.csproj" AdditionalProperties="SelfContained=false" />
   </ItemGroup>
+
+  <Target Name="ExcludeScreenRecorderLibFromSingleFile" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Condition="'%(Filename)' == 'ScreenRecorderLib'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 
 </Project>
